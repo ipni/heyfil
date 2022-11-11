@@ -19,7 +19,7 @@ The reported status of a state market participants are:
 | status              | Description                                                                                                                         |
 |---------------------|-------------------------------------------------------------------------------------------------------------------------------------|
 | `ok`                | Participant is an index provider with non-empty head successfully announced to IPNI.                                                |
-| `err-api-call`      | Failure occurred while calling the FileCoin API caused bo communication error.                                                      |
+| `err-api-call`      | Failure occurred while calling the FileCoin API caused by communication error.                                                      |
 | `err-internal`      | Failed to get participant's address which was not a communication or RPC error response.                                            |
 | `err-rpc-unknown`   | Failed to get participant's address caused by RPC error response.                                                                   |
 | `not-miner`         | The participant is not a miner.                                                                                                     |
