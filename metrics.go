@@ -20,7 +20,7 @@ type metrics struct {
 
 	countsByStatusLock sync.RWMutex
 	countsByStatus     map[Status]int64
-	totalTargetCount   atomic.Int64
+	totalTargetCount   atomic.Value
 }
 
 func (m *metrics) start() error {
@@ -50,7 +50,7 @@ func (m *metrics) start() error {
 	return meter.RegisterCallback(
 		[]instrument.Asynchronous{m.minersByStatus, m.stateMarketParticipants},
 		func(ctx context.Context) {
-			m.stateMarketParticipants.Observe(ctx, m.totalTargetCount.Load())
+			m.stateMarketParticipants.Observe(ctx, m.totalTargetCount.Load().(int64))
 			m.reportCountsByStatus(ctx)
 		},
 	)
