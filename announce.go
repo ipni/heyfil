@@ -45,7 +45,8 @@ func (hf *heyFil) announce(ctx context.Context, ai *peer.AddrInfo, head cid.Cid)
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, hf.httpAnnounceEndpoint, bytes.NewBuffer(anncb))
+	url := hf.httpIndexerEndpoint + `/ingest/announce`
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewBuffer(anncb))
 	if err != nil {
 		return err
 	}
