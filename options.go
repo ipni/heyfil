@@ -12,29 +12,33 @@ import (
 type (
 	Option  func(*options) error
 	options struct {
-		api                  string
-		h                    host.Host
-		topic                string
-		headProtocolPattern  *regexp.Regexp
-		maxConcCheck         int
-		checkInterval        *time.Ticker
-		snapshotInterval     *time.Ticker
-		serverListenAddr     string
-		httpClient           *http.Client
-		httpAnnounceEndpoint string
+		api                           string
+		h                             host.Host
+		topic                         string
+		headProtocolPattern           *regexp.Regexp
+		maxConcurrentParticipantCheck int
+		participantsCheckInterval     *time.Ticker
+		dealStatsRefreshInterval      *time.Ticker
+		snapshotInterval              *time.Ticker
+		serverListenAddr              string
+		httpClient                    *http.Client
+		marketDealsAlt                string
+		httpIndexerEndpoint           string
 	}
 )
 
 func newOptions(o ...Option) (*options, error) {
 	opts := &options{
-		api:                  `https://api.node.glif.io/rpc/v0/`,
-		httpAnnounceEndpoint: `https://cid.contact/ingest/announce`,
-		httpClient:           http.DefaultClient,
-		maxConcCheck:         10,
-		topic:                `/indexer/ingest/mainnet`,
-		checkInterval:        time.NewTicker(1 * time.Hour),
-		snapshotInterval:     time.NewTicker(10 * time.Second),
-		serverListenAddr:     "0.0.0.0:8080",
+		api:                           `https://api.node.glif.io/rpc/v0/`,
+		marketDealsAlt:                `https://marketdeals.s3.amazonaws.com/StateMarketDeals.json`,
+		httpIndexerEndpoint:           `https://cid.contact`,
+		httpClient:                    http.DefaultClient,
+		maxConcurrentParticipantCheck: 10,
+		topic:                         `/indexer/ingest/mainnet`,
+		participantsCheckInterval:     time.NewTicker(1 * time.Hour),
+		snapshotInterval:              time.NewTicker(10 * time.Second),
+		dealStatsRefreshInterval:      time.NewTicker(1 * time.Hour),
+		serverListenAddr:              "0.0.0.0:8080",
 	}
 	for _, apply := range o {
 		if err := apply(opts); err != nil {
@@ -83,16 +87,16 @@ func WithIndexerTopic(t string) Option {
 // Defaults to 10.
 func WithMaxConcurrentChecks(m int) Option {
 	return func(o *options) error {
-		o.maxConcCheck = m
+		o.maxConcurrentParticipantCheck = m
 		return nil
 	}
 }
 
-// WithCheckInterval sets the interval at which state market participants are checked.
+// WithParticipantCheckInterval sets the interval at which state market participants are checked.
 // Defaults to 1 hours if unset.
-func WithCheckInterval(t *time.Ticker) Option {
+func WithParticipantCheckInterval(t *time.Ticker) Option {
 	return func(o *options) error {
-		o.checkInterval = t
+		o.participantsCheckInterval = t
 		return nil
 	}
 }
@@ -116,11 +120,11 @@ func WithListenAddr(addr string) Option {
 	}
 }
 
-// WithHttpAnnounceEndpoint sets the HTTP endpoint that accepts IPNI announcement requests.
-// Defaults to https://cid.contact/ingest/announce
-func WithHttpAnnounceEndpoint(url string) Option {
+// WithHttpIndexerEndpoint sets the HTTP endpoint of an IPNI node.
+// Defaults to https://cid.contact
+func WithHttpIndexerEndpoint(url string) Option {
 	return func(o *options) error {
-		o.httpAnnounceEndpoint = url
+		o.httpIndexerEndpoint = url
 		return nil
 	}
 }

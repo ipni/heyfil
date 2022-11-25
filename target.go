@@ -13,15 +13,17 @@ import (
 type (
 	Status int
 	Target struct {
-		hf           *heyFil
-		ID           string
-		Status       Status
-		AddrInfo     *peer.AddrInfo
-		LastChecked  time.Time
-		Err          error
-		Topic        string
-		HeadProtocol protocol.ID
-		Head         cid.Cid
+		hf             *heyFil
+		ID             string
+		Status         Status
+		AddrInfo       *peer.AddrInfo
+		LastChecked    time.Time
+		Err            error
+		Topic          string
+		HeadProtocol   protocol.ID
+		Head           cid.Cid
+		KnownByIndexer bool
+		DealCount      int64
 	}
 )
 
@@ -43,6 +45,8 @@ const (
 
 func (t *Target) check(ctx context.Context) *Target {
 	defer func() { t.LastChecked = time.Now() }()
+
+	t.DealCount = t.hf.dealStats.getDealCount(t.ID)
 
 	// Get address for miner ID from FileCoin API.
 	t.AddrInfo, t.Err = t.hf.stateMinerInfo(ctx, t.ID)
@@ -70,6 +74,13 @@ func (t *Target) check(ctx context.Context) *Target {
 		logger.Debugw("failed to get state miner info", "err", t.Err)
 		t.Status = StatusInternalError
 		return t
+	}
+
+	// Check if the target is known by the indexer now that it has a non-nil addrinfo.
+	var err error
+	t.KnownByIndexer, err = t.hf.isKnownByIndexer(ctx, t.AddrInfo.ID)
+	if err != nil {
+		logger.Errorw("failed to check if target is known by indexer", "err", err)
 	}
 
 	// Check if the target is an index provider on the expected topic.

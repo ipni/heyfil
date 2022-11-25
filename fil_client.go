@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -17,16 +19,35 @@ import (
 
 type (
 	StateMinerInfoResp struct {
-		PeerId     string
-		Multiaddrs []string
+		PeerId     string   `json:"PeerId"`
+		Multiaddrs []string `json:"Multiaddrs"`
+	}
+	ChainHead struct {
+		Height int64 `json:"Height"`
+	}
+	StateMarketDealResult struct {
+		Key  string
+		Deal *StateMarketDeal
+		Err  error
+	}
+	StateMarketDeal struct {
+		Proposal struct {
+			Provider string `json:"Provider"`
+			EndEpoch int64  `json:"EndEpoch"`
+		} `json:"Proposal"`
+		State struct {
+			SectorStartEpoch int64 `json:"SectorStartEpoch"`
+			SlashEpoch       int64 `json:"SlashEpoch"`
+		} `json:"State"`
 	}
 )
 
 const (
-	methodFilStateMarketParticipants = "Filecoin.StateMarketParticipants"
-	methodFilStateMinerInfo          = "Filecoin.StateMinerInfo"
+	methodFilStateMarketParticipants = `Filecoin.StateMarketParticipants`
+	methodFilStateMinerInfo          = `Filecoin.StateMinerInfo`
+	methodFilChainHead               = `Filecoin.ChainHead`
 
-	// noopURL is a placeholder for mandatory but noop URL reqired by HTTP client during go-stream
+	// noopURL is a placeholder for mandatory but noop URL required by HTTP client during go-stream
 	// connection.
 	noopURL = "http://publisher.invalid/head"
 )
@@ -88,6 +109,107 @@ func (hf *heyFil) stateMinerInfo(ctx context.Context, mid string) (*peer.AddrInf
 			Addrs: adds,
 		}, nil
 	}
+}
+
+func (hf *heyFil) chainHead(ctx context.Context) (*ChainHead, error) {
+	resp, err := hf.c.Call(ctx, methodFilChainHead)
+	switch {
+	case err != nil:
+		return nil, err
+	case resp.Error != nil:
+		return nil, resp.Error
+	default:
+		var c ChainHead
+		if err := resp.GetObject(&c); err != nil {
+			return nil, err
+		}
+		return &c, nil
+	}
+}
+
+func (hf *heyFil) stateMarketDeals(ctx context.Context) (chan StateMarketDealResult, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, hf.marketDealsAlt, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := hf.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("faild to get market deals: %d %s", resp.StatusCode, resp.Status)
+	}
+	results := make(chan StateMarketDealResult, 1)
+	go func() {
+
+		defer func() {
+			close(results)
+			_ = resp.Body.Close()
+		}()
+
+		// Process deal information in streaming fashion for a smaller more predictable memory
+		// footprint. Because, it is provided as a giant (currently ~5 GiB) JSON file off S3 usually
+		// and we don't know how big it might grow.
+		decoder := json.NewDecoder(resp.Body)
+		dealIDParser := func() (string, error) {
+			token, err := decoder.Token()
+			if err != nil {
+				return "", err
+			}
+			switch tt := token.(type) {
+			case string:
+				return tt, nil
+			case json.Delim:
+				if tt.String() != `}` {
+					return "", fmt.Errorf("expected delimier close object but got: %s", tt)
+				}
+				return "", nil
+			default:
+				return "", fmt.Errorf("expected string but got: %T", token)
+			}
+		}
+
+		dealParser := func() (*StateMarketDeal, error) {
+			var deal StateMarketDeal
+			err := decoder.Decode(&deal)
+			if err != nil {
+				return nil, err
+			}
+			return &deal, nil
+		}
+
+		token, err := decoder.Token()
+		if err != nil {
+			results <- StateMarketDealResult{Err: err}
+			return
+		}
+		if _, ok := token.(json.Delim); !ok {
+			results <- StateMarketDealResult{Err: fmt.Errorf("unexpected JSON token: expected delimiter but got: %v", token)}
+			return
+		}
+		for {
+			var next StateMarketDealResult
+			next.Key, next.Err = dealIDParser()
+			if next.Err != nil {
+				results <- next
+				return
+			}
+			if next.Key == "" {
+				// We should be at the end; assert so.
+				if t, err := decoder.Token(); err != io.EOF {
+					results <- StateMarketDealResult{Err: fmt.Errorf("expected no more tokens but got: %v", t)}
+				}
+				return
+			}
+			next.Deal, next.Err = dealParser()
+			if next.Err != nil {
+				results <- next
+				return
+			}
+			results <- next
+		}
+	}()
+	return results, nil
 }
 
 func (hf *heyFil) supportsHeadProtocol(ctx context.Context, ai *peer.AddrInfo) (bool, string, protocol.ID, error) {

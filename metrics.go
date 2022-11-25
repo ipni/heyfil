@@ -8,30 +8,44 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/prometheus"
 	"go.opentelemetry.io/otel/metric/instrument"
+	"go.opentelemetry.io/otel/metric/instrument/asyncfloat64"
 	"go.opentelemetry.io/otel/metric/instrument/asyncint64"
 	"go.opentelemetry.io/otel/metric/unit"
 	"go.opentelemetry.io/otel/sdk/metric"
 )
 
 type metrics struct {
-	exporter                *prometheus.Exporter
-	minersByStatus          asyncint64.Gauge
-	stateMarketParticipants asyncint64.Gauge
+	exporter *prometheus.Exporter
 
-	countsByStatusLock sync.RWMutex
-	countsByStatus     map[Status]int64
-	totalTargetCount   atomic.Value
+	participantsByStatus asyncint64.Gauge
+	participantsTotal    asyncint64.Gauge
+	participantsCoverage asyncfloat64.Gauge
+	dealsTotal           asyncint64.Gauge
+	dealsCoverage        asyncfloat64.Gauge
+
+	snapshotLock   sync.RWMutex
+	countsByStatus map[Status]int64
+
+	totalParticipantCount atomic.Value
+	totalDealCount        atomic.Value
+
+	reachableWithNonZeroDeals      int
+	knownByIndexer                 int
+	dealCountDiscoverableByIndexer int64
 }
 
 func (m *metrics) start() error {
+	m.totalParticipantCount.Store(int64(0))
+	m.totalDealCount.Store(int64(0))
+
 	var err error
-	if m.exporter, err = prometheus.New(); err != nil {
+	if m.exporter, err = prometheus.New(prometheus.WithoutUnits()); err != nil {
 		return err
 	}
 	provider := metric.NewMeterProvider(metric.WithReader(m.exporter))
 	meter := provider.Meter("ipni/heyfil")
 
-	if m.minersByStatus, err = meter.AsyncInt64().Gauge(
+	if m.participantsByStatus, err = meter.AsyncInt64().Gauge(
 		"ipni/heyfil/miners_by_status",
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("The state markets participants count by status."),
@@ -39,44 +53,104 @@ func (m *metrics) start() error {
 		return err
 	}
 
-	if m.stateMarketParticipants, err = meter.AsyncInt64().Gauge(
-		"ipni/heyfil/state_market_participants",
+	if m.participantsTotal, err = meter.AsyncInt64().Gauge(
+		"ipni/heyfil/state_market_participants_total",
 		instrument.WithUnit(unit.Dimensionless),
-		instrument.WithDescription("The number of state market participants returned by the FileCoin API."),
+		instrument.WithDescription("The total number of state market participants returned by the FileCoin API."),
+	); err != nil {
+		return err
+	}
+
+	if m.dealsTotal, err = meter.AsyncInt64().Gauge(
+		"ipni/heyfil/state_market_deals_total",
+		instrument.WithUnit(unit.Dimensionless),
+		instrument.WithDescription("The total number of state market deals discovered from FileCoin API."),
+	); err != nil {
+		return err
+	}
+
+	if m.dealsCoverage, err = meter.AsyncFloat64().Gauge(
+		"ipni/heyfil/state_market_deal_coverage_ratio",
+		instrument.WithUnit(unit.Dimensionless),
+		instrument.WithDescription("The ratio of state market deals covered by the indexer."),
+	); err != nil {
+		return err
+	}
+
+	if m.participantsCoverage, err = meter.AsyncFloat64().Gauge(
+		"ipni/heyfil/state_market_participant_coverage_ratio",
+		instrument.WithUnit(unit.Dimensionless),
+		instrument.WithDescription("The ratio of state market participants covered by the indexer."),
 	); err != nil {
 		return err
 	}
 
 	return meter.RegisterCallback(
-		[]instrument.Asynchronous{m.minersByStatus, m.stateMarketParticipants},
+		[]instrument.Asynchronous{
+			m.participantsByStatus,
+			m.participantsTotal,
+			m.dealsTotal,
+			m.dealsCoverage,
+			m.participantsCoverage,
+		},
 		func(ctx context.Context) {
-			m.stateMarketParticipants.Observe(ctx, m.totalTargetCount.Load().(int64))
-			m.reportCountsByStatus(ctx)
+			m.participantsTotal.Observe(ctx, m.totalParticipantCount.Load().(int64))
+			m.dealsTotal.Observe(ctx, m.totalDealCount.Load().(int64))
+			m.reportFromSnapshot(ctx)
 		},
 	)
 }
 
-func (m *metrics) reportCountsByStatus(ctx context.Context) {
-	m.countsByStatusLock.RLock()
-	defer m.countsByStatusLock.RUnlock()
+func (m *metrics) reportFromSnapshot(ctx context.Context) {
+	m.snapshotLock.RLock()
+	defer m.snapshotLock.RUnlock()
+
 	for status, c := range m.countsByStatus {
-		m.minersByStatus.Observe(ctx, c, targetStatusToAttribute(status))
+		m.participantsByStatus.Observe(ctx, c, targetStatusToAttribute(status))
 	}
+
+	var dc float64
+	totalDealCount := m.totalDealCount.Load().(int64)
+	if totalDealCount > 0 {
+		dc = float64(m.dealCountDiscoverableByIndexer) / float64(totalDealCount)
+	}
+	m.dealsCoverage.Observe(ctx, dc)
+
+	var pc float64
+	if m.reachableWithNonZeroDeals > 0 {
+		pc = float64(m.knownByIndexer) / float64(m.reachableWithNonZeroDeals)
+	}
+	m.participantsCoverage.Observe(ctx, pc)
 }
 
-func (m *metrics) snapshotCountByStatus(targets map[string]*Target) {
-	m.countsByStatusLock.Lock()
-	defer m.countsByStatusLock.Unlock()
+func (m *metrics) snapshot(targets map[string]*Target) {
+	m.snapshotLock.Lock()
+	defer m.snapshotLock.Unlock()
+
 	m.countsByStatus = make(map[Status]int64)
-	for _, res := range targets {
-		c := m.countsByStatus[res.Status]
-		c++
-		m.countsByStatus[res.Status] = c
+	m.reachableWithNonZeroDeals = 0
+	m.knownByIndexer = 0
+	m.dealCountDiscoverableByIndexer = 0
+	for _, t := range targets {
+		m.countsByStatus[t.Status] = m.countsByStatus[t.Status] + 1
+		if t.AddrInfo != nil {
+			if t.DealCount > 0 {
+				if t.KnownByIndexer {
+					m.knownByIndexer++
+					m.dealCountDiscoverableByIndexer += t.DealCount
+				}
+				m.reachableWithNonZeroDeals++
+			}
+		}
 	}
 }
 
-func (m *metrics) notifyTargetCount(c int) {
-	m.totalTargetCount.Store(int64(c))
+func (m *metrics) notifyParticipantCount(c int64) {
+	m.totalParticipantCount.Store(c)
+}
+
+func (m *metrics) notifyDealCount(c int64) {
+	m.totalDealCount.Store(c)
 }
 
 func (m *metrics) shutdown(ctx context.Context) error {

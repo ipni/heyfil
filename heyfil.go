@@ -20,8 +20,9 @@ type (
 		toCheck chan *Target
 		checked chan *Target
 
-		metrics metrics
-		server  http.Server
+		metrics   metrics
+		dealStats *dealStats
+		server    http.Server
 	}
 )
 
@@ -30,13 +31,15 @@ func newHeyFil(o ...Option) (*heyFil, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &heyFil{
+	hf := &heyFil{
 		options: opts,
 		c:       jsonrpc.NewClient(opts.api),
 		targets: make(map[string]*Target),
 		toCheck: make(chan *Target, 100),
 		checked: make(chan *Target, 100),
-	}, nil
+	}
+	hf.dealStats = &dealStats{hf: hf}
+	return hf, nil
 }
 
 func (hf *heyFil) Start(ctx context.Context) error {
@@ -46,9 +49,10 @@ func (hf *heyFil) Start(ctx context.Context) error {
 	if err := hf.startServer(); err != nil {
 		return err
 	}
+	hf.dealStats.start(ctx)
 
 	// start checkers.
-	for i := 0; i < hf.maxConcCheck; i++ {
+	for i := 0; i < hf.maxConcurrentParticipantCheck; i++ {
 		go hf.checker(ctx)
 	}
 
@@ -61,7 +65,7 @@ func (hf *heyFil) Start(ctx context.Context) error {
 				logger.Errorw("failed to get state market participants", "err", err)
 				return
 			}
-			hf.metrics.notifyTargetCount(len(mids))
+			hf.metrics.notifyParticipantCount(int64(len(mids)))
 			logger.Infow("fetched state market participants", "count", len(mids))
 			for _, mid := range mids {
 				select {
@@ -76,7 +80,7 @@ func (hf *heyFil) Start(ctx context.Context) error {
 			select {
 			case <-ctx.Done():
 				return
-			case t := <-hf.checkInterval.C:
+			case t := <-hf.participantsCheckInterval.C:
 				dispatch(ctx, t)
 			}
 		}
@@ -86,7 +90,7 @@ func (hf *heyFil) Start(ctx context.Context) error {
 	go func() {
 		snapshot := func(ctx context.Context, t time.Time) {
 			logger := logger.With("t", t)
-			hf.metrics.snapshotCountByStatus(hf.targets)
+			hf.metrics.snapshot(hf.targets)
 			logger.Debugw("reported check results", "miner-count", len(hf.targets))
 		}
 		snapshot(ctx, time.Now())
