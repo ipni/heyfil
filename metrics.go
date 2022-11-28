@@ -14,6 +14,12 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric"
 )
 
+var (
+	attributeWithAddress    = attribute.Bool("with-addr", true)
+	attributeKnownByIndexer = attribute.Bool("known-by-indexer", true)
+	attributeWithDeal       = attribute.Bool("with-deal", true)
+)
+
 type metrics struct {
 	exporter *prometheus.Exporter
 
@@ -23,20 +29,37 @@ type metrics struct {
 	dealsTotal           asyncint64.Gauge
 	dealsCoverage        asyncfloat64.Gauge
 
-	snapshotLock   sync.RWMutex
-	countsByStatus map[Status]int64
+	countsByStatusLock sync.RWMutex
+	countsByStatus     map[Status]int64
 
+	// totalParticipantCount is the total number of state market participants retrieved from
+	// FileCoin API stored as int64.
 	totalParticipantCount atomic.Value
-	totalDealCount        atomic.Value
-
-	reachableWithNonZeroDeals      int
-	knownByIndexer                 int
-	dealCountDiscoverableByIndexer int64
+	// totalDealCount is the total number of state market deals retrieved from FileCoin API  stored
+	// as int64.
+	totalDealCount atomic.Value
+	// totalAddressableParticipantsWithNonZeroDeals is the total number of state market participants
+	// which: 1) had non-nil peer.AddrInfo on FileCoin API, and 2) have made at least one deal
+	// stored as int64.
+	totalAddressableParticipantsWithNonZeroDeals atomic.Value
+	// totalAddressableParticipants s the total number of state market participants which had
+	// non-nil peer.AddrInfo on FileCoin API.
+	totalAddressableParticipants atomic.Value
+	// totalParticipantsKnownByIndexer is the total number of state market participants that are
+	// listed as a provider by network indexer stored as int64.
+	totalParticipantsKnownByIndexer atomic.Value
+	// totalDealCountByParticipantsKnownToIndexer is the total number of deals made by the state
+	// market participants that are listed as a provider by network indexer stored as int64.
+	totalDealCountByParticipantsKnownToIndexer atomic.Value
 }
 
 func (m *metrics) start() error {
 	m.totalParticipantCount.Store(int64(0))
 	m.totalDealCount.Store(int64(0))
+	m.totalAddressableParticipantsWithNonZeroDeals.Store(int64(0))
+	m.totalAddressableParticipants.Store(int64(0))
+	m.totalParticipantsKnownByIndexer.Store(int64(0))
+	m.totalDealCountByParticipantsKnownToIndexer.Store(int64(0))
 
 	var err error
 	if m.exporter, err = prometheus.New(prometheus.WithoutUnits()); err != nil {
@@ -56,7 +79,10 @@ func (m *metrics) start() error {
 	if m.participantsTotal, err = meter.AsyncInt64().Gauge(
 		"ipni/heyfil/state_market_participants_total",
 		instrument.WithUnit(unit.Dimensionless),
-		instrument.WithDescription("The total number of state market participants returned by the FileCoin API."),
+		instrument.WithDescription("The total number of state market participants returned by the FileCoin API. "+
+			"This gauge also offers the total numbers for participants with address, the ones known by the indexer, and "+
+			"participants with address plus at least one deal. See `with-address`, `known-by-indexer`, and `with-deal` "+
+			"attributes."),
 	); err != nil {
 		return err
 	}
@@ -64,7 +90,9 @@ func (m *metrics) start() error {
 	if m.dealsTotal, err = meter.AsyncInt64().Gauge(
 		"ipni/heyfil/state_market_deals_total",
 		instrument.WithUnit(unit.Dimensionless),
-		instrument.WithDescription("The total number of state market deals discovered from FileCoin API."),
+		instrument.WithDescription("The total number of state market deals discovered from FileCoin API. "+
+			"This gauge also offers the total number of deals made by participants that are known to the indexer. "+
+			"See `known-by-indexer`attribute."),
 	); err != nil {
 		return err
 	}
@@ -89,60 +117,77 @@ func (m *metrics) start() error {
 		[]instrument.Asynchronous{
 			m.participantsByStatus,
 			m.participantsTotal,
+			m.participantsCoverage,
 			m.dealsTotal,
 			m.dealsCoverage,
-			m.participantsCoverage,
 		},
-		func(ctx context.Context) {
-			m.participantsTotal.Observe(ctx, m.totalParticipantCount.Load().(int64))
-			m.dealsTotal.Observe(ctx, m.totalDealCount.Load().(int64))
-			m.reportFromSnapshot(ctx)
-		},
+		m.reportAsyncMetrics,
 	)
 }
 
-func (m *metrics) reportFromSnapshot(ctx context.Context) {
-	m.snapshotLock.RLock()
-	defer m.snapshotLock.RUnlock()
-
+func (m *metrics) reportAsyncMetrics(ctx context.Context) {
+	m.countsByStatusLock.RLock()
 	for status, c := range m.countsByStatus {
 		m.participantsByStatus.Observe(ctx, c, targetStatusToAttribute(status))
 	}
+	m.countsByStatusLock.RUnlock()
+
+	totalParticipants := m.totalParticipantCount.Load().(int64)
+	totalParticipantsKnownByIndexer := m.totalParticipantsKnownByIndexer.Load().(int64)
+	totalAddressableParticipants := m.totalAddressableParticipants.Load().(int64)
+	totalAddressableParticipantsWithDeal := m.totalAddressableParticipantsWithNonZeroDeals.Load().(int64)
+	m.participantsTotal.Observe(ctx, totalParticipants)
+	m.participantsTotal.Observe(ctx, totalParticipantsKnownByIndexer, attributeKnownByIndexer)
+	m.participantsTotal.Observe(ctx, totalAddressableParticipants, attributeWithAddress)
+	m.participantsTotal.Observe(ctx, totalAddressableParticipantsWithDeal, attributeWithAddress, attributeWithDeal)
+
+	totalDealCount := m.totalDealCount.Load().(int64)
+	totalDealCountByParticipantsKnownToIndexer := m.totalDealCountByParticipantsKnownToIndexer.Load().(int64)
+	m.dealsTotal.Observe(ctx, totalDealCount)
+	m.dealsTotal.Observe(ctx, totalDealCountByParticipantsKnownToIndexer, attributeKnownByIndexer)
 
 	var dc float64
-	totalDealCount := m.totalDealCount.Load().(int64)
 	if totalDealCount > 0 {
-		dc = float64(m.dealCountDiscoverableByIndexer) / float64(totalDealCount)
+		dc = float64(totalDealCountByParticipantsKnownToIndexer) / float64(totalDealCount)
 	}
 	m.dealsCoverage.Observe(ctx, dc)
 
 	var pc float64
-	if m.reachableWithNonZeroDeals > 0 {
-		pc = float64(m.knownByIndexer) / float64(m.reachableWithNonZeroDeals)
+	if totalAddressableParticipantsWithDeal > 0 {
+		pc = float64(totalParticipantsKnownByIndexer) / float64(totalAddressableParticipantsWithDeal)
 	}
 	m.participantsCoverage.Observe(ctx, pc)
 }
 
 func (m *metrics) snapshot(targets map[string]*Target) {
-	m.snapshotLock.Lock()
-	defer m.snapshotLock.Unlock()
+	var totalAddressableParticipants int64
+	var totalAddressableParticipantsWithNonZeroDeals int64
+	var totalParticipantsKnownByIndexer int64
+	var totalDealCountByParticipantsKnownToIndexer int64
+	countsByStatus := make(map[Status]int64)
 
-	m.countsByStatus = make(map[Status]int64)
-	m.reachableWithNonZeroDeals = 0
-	m.knownByIndexer = 0
-	m.dealCountDiscoverableByIndexer = 0
 	for _, t := range targets {
-		m.countsByStatus[t.Status] = m.countsByStatus[t.Status] + 1
+		countsByStatus[t.Status] = countsByStatus[t.Status] + 1
 		if t.AddrInfo != nil {
 			if t.DealCount > 0 {
 				if t.KnownByIndexer {
-					m.knownByIndexer++
-					m.dealCountDiscoverableByIndexer += t.DealCount
+					totalParticipantsKnownByIndexer++
+					totalDealCountByParticipantsKnownToIndexer += t.DealCount
 				}
-				m.reachableWithNonZeroDeals++
+				totalAddressableParticipantsWithNonZeroDeals++
 			}
+			totalAddressableParticipants++
 		}
 	}
+
+	m.countsByStatusLock.Lock()
+	m.countsByStatus = countsByStatus
+	defer m.countsByStatusLock.Unlock()
+
+	m.totalAddressableParticipants.Store(totalAddressableParticipants)
+	m.totalAddressableParticipantsWithNonZeroDeals.Store(totalAddressableParticipantsWithNonZeroDeals)
+	m.totalParticipantsKnownByIndexer.Store(totalParticipantsKnownByIndexer)
+	m.totalDealCountByParticipantsKnownToIndexer.Store(totalDealCountByParticipantsKnownToIndexer)
 }
 
 func (m *metrics) notifyParticipantCount(c int64) {
