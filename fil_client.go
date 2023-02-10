@@ -221,9 +221,9 @@ func (hf *heyFil) supportsHeadProtocol(ctx context.Context, ai *peer.AddrInfo) (
 		return false, "", "", err
 	}
 	for _, pid := range pids {
-		ok, topic := hf.findHeadProtocolMatches(pid)
+		ok, topic := hf.findHeadProtocolMatches(string(pid))
 		if ok {
-			return true, topic, protocol.ID(pid), nil
+			return true, topic, pid, nil
 		}
 	}
 	return false, "", "", nil
