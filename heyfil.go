@@ -60,7 +60,7 @@ func (hf *heyFil) Start(ctx context.Context) error {
 	go func() {
 		dispatch := func(ctx context.Context, t time.Time) {
 			logger := logger.With("t", t)
-			mids, err := hf.stateMarketParticipants(ctx)
+			mids, err := hf.stateListMiners(ctx)
 			if err != nil {
 				logger.Errorw("failed to get state market participants", "err", err)
 				return

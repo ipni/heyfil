@@ -29,7 +29,7 @@ type (
 
 func newOptions(o ...Option) (*options, error) {
 	opts := &options{
-		api:                           `https://api.node.glif.io/rpc/v0/`,
+		api:                           `https://api.node.glif.io`,
 		marketDealsAlt:                `https://marketdeals.s3.amazonaws.com/StateMarketDeals.json`,
 		httpIndexerEndpoint:           `https://cid.contact`,
 		httpClient:                    http.DefaultClient,
