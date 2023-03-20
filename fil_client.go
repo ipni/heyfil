@@ -43,30 +43,26 @@ type (
 )
 
 const (
-	methodFilStateMarketParticipants = `Filecoin.StateMarketParticipants`
-	methodFilStateMinerInfo          = `Filecoin.StateMinerInfo`
-	methodFilChainHead               = `Filecoin.ChainHead`
+	methodFilStateListMiners = `Filecoin.StateListMiners`
+	methodFilStateMinerInfo  = `Filecoin.StateMinerInfo`
+	methodFilChainHead       = `Filecoin.ChainHead`
 
 	// noopURL is a placeholder for mandatory but noop URL required by HTTP client during go-stream
 	// connection.
 	noopURL = "http://publisher.invalid/head"
 )
 
-func (hf *heyFil) stateMarketParticipants(ctx context.Context) ([]string, error) {
-	resp, err := hf.c.Call(ctx, methodFilStateMarketParticipants, nil)
+func (hf *heyFil) stateListMiners(ctx context.Context) ([]string, error) {
+	resp, err := hf.c.Call(ctx, methodFilStateListMiners, nil)
 	switch {
 	case err != nil:
 		return nil, err
 	case resp.Error != nil:
 		return nil, resp.Error
 	default:
-		smp := make(map[string]any)
-		if err = resp.GetObject(&smp); err != nil {
+		var mids []string
+		if err = resp.GetObject(&mids); err != nil {
 			return nil, err
-		}
-		mids := make([]string, 0, len(smp))
-		for mid := range smp {
-			mids = append(mids, mid)
 		}
 		return mids, nil
 	}
