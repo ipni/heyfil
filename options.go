@@ -22,7 +22,8 @@ type (
 		snapshotInterval              *time.Ticker
 		serverListenAddr              string
 		httpClient                    *http.Client
-		marketDealsAlt                string
+		marketDealsS3Snapshot         string
+		marketDealsFilTools           string
 		httpIndexerEndpoint           string
 	}
 )
@@ -30,7 +31,8 @@ type (
 func newOptions(o ...Option) (*options, error) {
 	opts := &options{
 		api:                           `https://api.node.glif.io`,
-		marketDealsAlt:                `https://marketdeals.s3.amazonaws.com/StateMarketDeals.json`,
+		marketDealsS3Snapshot:         `https://marketdeals.s3.amazonaws.com/StateMarketDeals.json.zst`,
+		marketDealsFilTools:           `https://filecoin.tools/api/deals/list`,
 		httpIndexerEndpoint:           `https://cid.contact`,
 		httpClient:                    http.DefaultClient,
 		maxConcurrentParticipantCheck: 10,
