@@ -16,7 +16,7 @@ type (
 		hf             *heyFil
 		ID             string
 		Status         Status
-		AddrInfo       *peer.AddrInfo
+		AddrInfo       peer.AddrInfo
 		LastChecked    time.Time
 		Err            error
 		Topic          string
@@ -41,20 +41,31 @@ const (
 	StatusEmptyHead
 	StatusGetHeadError
 	StatusAnnounceError
+	StatusUnidentifiable
+	StatusNoAddrInfo
 )
 
 func (t *Target) check(ctx context.Context) *Target {
 	defer func() { t.LastChecked = time.Now() }()
-
+	logger := logger.With("miner", t.ID)
 	t.DealCount = t.hf.dealStats.getDealCount(t.ID)
 
 	// Get address for miner ID from FileCoin API.
 	t.AddrInfo, t.Err = t.hf.stateMinerInfo(ctx, t.ID)
 	switch e := t.Err.(type) {
 	case nil:
-		if t.AddrInfo == nil {
+		switch {
+		case t.AddrInfo.ID == "" && len(t.AddrInfo.Addrs) == 0:
+			t.Status = StatusNoAddrInfo
+			return t
+		case t.AddrInfo.ID == "":
+			t.Status = StatusUnidentifiable
+			return t
+		case len(t.AddrInfo.Addrs) == 0:
 			t.Status = StatusUnaddressable
 			return t
+		default:
+			logger.Debugw("Discovered Addrs for miner", "addrs", t.AddrInfo)
 		}
 	case *jsonrpc.HTTPError:
 		logger.Debugw("HTTP error while getting state miner info", "status", e.Code, "err", t.Err)
@@ -85,7 +96,7 @@ func (t *Target) check(ctx context.Context) *Target {
 
 	// Check if the target is an index provider on the expected topic.
 	var ok bool
-	ok, t.Topic, t.HeadProtocol, t.Err = t.hf.supportsHeadProtocol(ctx, t.AddrInfo)
+	ok, t.Topic, t.HeadProtocol, t.Err = t.hf.supportsHeadProtocol(ctx, &t.AddrInfo)
 	switch {
 	case t.Err != nil:
 		t.Status = StatusUnreachable
@@ -101,14 +112,14 @@ func (t *Target) check(ctx context.Context) *Target {
 	}
 
 	// Check if there is a non-empty head CID and if so announce it.
-	t.Head, t.Err = t.hf.getHead(ctx, t.AddrInfo, t.HeadProtocol)
+	t.Head, t.Err = t.hf.getHead(ctx, &t.AddrInfo, t.HeadProtocol)
 	switch {
 	case t.Err != nil:
 		t.Status = StatusGetHeadError
 	case cid.Undef.Equals(t.Head):
 		t.Status = StatusEmptyHead
 	default:
-		if t.Err = t.hf.announce(ctx, t.AddrInfo, t.Head); t.Err != nil {
+		if t.Err = t.hf.announce(ctx, &t.AddrInfo, t.Head); t.Err != nil {
 			t.Status = StatusAnnounceError
 		} else {
 			t.Status = StatusOK

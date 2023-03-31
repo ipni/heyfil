@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 
 	"github.com/ipfs/go-cid"
 	gostream "github.com/libp2p/go-libp2p-gostream"
@@ -40,6 +41,12 @@ type (
 			SlashEpoch       int64 `json:"SlashEpoch"`
 		} `json:"State"`
 	}
+	filecoinToolsDealListPage struct {
+		Deals []struct {
+			DealID   int
+			DealInfo StateMarketDeal
+		}
+	}
 )
 
 const (
@@ -68,42 +75,40 @@ func (hf *heyFil) stateListMiners(ctx context.Context) ([]string, error) {
 	}
 }
 
-func (hf *heyFil) stateMinerInfo(ctx context.Context, mid string) (*peer.AddrInfo, error) {
+func (hf *heyFil) stateMinerInfo(ctx context.Context, mid string) (peer.AddrInfo, error) {
+	var ai peer.AddrInfo
 	resp, err := hf.c.Call(ctx, methodFilStateMinerInfo, mid, nil)
 	switch {
 	case err != nil:
-		return nil, err
+		return ai, err
 	case resp.Error != nil:
-		return nil, resp.Error
+		return ai, resp.Error
 	default:
 		var mi StateMinerInfoResp
 		if err = resp.GetObject(&mi); err != nil {
-			return nil, err
+			return ai, err
 		}
-		if len(mi.Multiaddrs) == 0 || len(mi.PeerId) == 0 {
-			// Don't bother decoding anything if the resulting addrinfo would not be contactable.
-			return nil, nil
-		}
-		pid, err := peer.Decode(mi.PeerId)
-		if err != nil {
-			return nil, err
-		}
-		adds := make([]multiaddr.Multiaddr, 0, len(mi.Multiaddrs))
-		for _, s := range mi.Multiaddrs {
-			mb, err := base64.StdEncoding.DecodeString(s)
-			if err != nil {
-				return nil, err
+		if len(mi.PeerId) != 0 {
+			var err error
+			if ai.ID, err = peer.Decode(mi.PeerId); err != nil {
+				return ai, err
 			}
-			addr, err := multiaddr.NewMultiaddrBytes(mb)
-			if err != nil {
-				return nil, err
-			}
-			adds = append(adds, addr)
 		}
-		return &peer.AddrInfo{
-			ID:    pid,
-			Addrs: adds,
-		}, nil
+		if len(mi.Multiaddrs) != 0 {
+			ai.Addrs = make([]multiaddr.Multiaddr, 0, len(mi.Multiaddrs))
+			for _, s := range mi.Multiaddrs {
+				mb, err := base64.StdEncoding.DecodeString(s)
+				if err != nil {
+					return ai, err
+				}
+				addr, err := multiaddr.NewMultiaddrBytes(mb)
+				if err != nil {
+					return ai, err
+				}
+				ai.Addrs = append(ai.Addrs, addr)
+			}
+		}
+		return ai, nil
 	}
 }
 
@@ -123,8 +128,73 @@ func (hf *heyFil) chainHead(ctx context.Context) (*ChainHead, error) {
 	}
 }
 
-func (hf *heyFil) stateMarketDeals(ctx context.Context) (chan StateMarketDealResult, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, hf.marketDealsAlt, nil)
+func (hf *heyFil) stateMarketDealsViaFilTools(ctx context.Context) (chan StateMarketDealResult, error) {
+
+	baseReq, err := http.NewRequestWithContext(ctx, http.MethodGet, hf.marketDealsFilTools, nil)
+	if err != nil {
+		return nil, err
+	}
+	results := make(chan StateMarketDealResult, 1)
+	go func() {
+		defer close(results)
+		page := 1
+		for {
+			req := baseReq.Clone(ctx)
+			q := req.URL.Query()
+			// The endpoint https://filecoin.tools/api/deals/list has a hard upper limit of 20_000 for page number.
+			// This is unfortunately true regardless of per_page parameter value. This means if per_page is small
+			// enough then a client cannot get deals that would fall beyond page 20K. Further, the results returned do
+			// not indicate the total number of deals available which makes it impossible to know if any deals were
+			// missed out due to the hard limit to the page number.
+			// To work around this unfortunate API design, use a large enough per_page value to have reasonable
+			// confidence that we will get all the deals.
+			q.Add("per_page", "3000")
+			q.Add("page", strconv.Itoa(page))
+			req.URL.RawQuery = q.Encode()
+
+			resp, err := hf.httpClient.Do(req)
+			if err != nil {
+				results <- StateMarketDealResult{Err: err}
+				return
+			}
+			if resp.StatusCode != http.StatusOK {
+				results <- StateMarketDealResult{
+					Err: fmt.Errorf("received unsuccessful response from FileCoin Tools while lsiting deals: %d", resp.StatusCode),
+				}
+				_ = resp.Body.Close()
+				return
+			}
+			var p filecoinToolsDealListPage
+			if err := json.NewDecoder(resp.Body).Decode(&p); err != nil {
+				results <- StateMarketDealResult{Err: err}
+				_ = resp.Body.Close()
+				return
+			}
+			_ = resp.Body.Close()
+
+			switch {
+			case len(p.Deals) == 0:
+				// No more deals left; we are done.
+				return
+			default:
+				for _, deal := range p.Deals {
+					results <- StateMarketDealResult{
+						Key:  strconv.Itoa(deal.DealID),
+						Deal: &deal.DealInfo,
+					}
+				}
+				page++
+			}
+		}
+	}()
+	return results, nil
+}
+
+//lint:ignore U1000 https://github.com/ipni/heyfil/issues/12
+func (hf *heyFil) stateMarketDealsViaS3Snapshot(ctx context.Context) (chan StateMarketDealResult, error) {
+	// FIXME: https://github.com/ipni/heyfil/issues/12
+	//        Format is changed; we now need to handle ZST compressed files.
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, hf.marketDealsS3Snapshot, nil)
 	if err != nil {
 		return nil, err
 	}

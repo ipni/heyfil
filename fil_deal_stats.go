@@ -33,7 +33,7 @@ func (ds *dealStats) refresh(ctx context.Context) error {
 	}
 	epoch := ch.Height
 
-	deals, err := ds.hf.stateMarketDeals(ctx)
+	deals, err := ds.hf.stateMarketDealsViaFilTools(ctx)
 	if err != nil {
 		return err
 	}
