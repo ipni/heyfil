@@ -24,6 +24,7 @@ type (
 		httpClient                    *http.Client
 		marketDealsS3Snapshot         string
 		marketDealsFilTools           string
+		marketDealsFilToolsEnabled    bool
 		httpIndexerEndpoint           string
 	}
 )

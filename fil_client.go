@@ -11,6 +11,7 @@ import (
 	"strconv"
 
 	"github.com/ipfs/go-cid"
+	"github.com/klauspost/compress/zstd"
 	gostream "github.com/libp2p/go-libp2p-gostream"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
@@ -190,10 +191,7 @@ func (hf *heyFil) stateMarketDealsViaFilTools(ctx context.Context) (chan StateMa
 	return results, nil
 }
 
-//lint:ignore U1000 https://github.com/ipni/heyfil/issues/12
 func (hf *heyFil) stateMarketDealsViaS3Snapshot(ctx context.Context) (chan StateMarketDealResult, error) {
-	// FIXME: https://github.com/ipni/heyfil/issues/12
-	//        Format is changed; we now need to handle ZST compressed files.
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, hf.marketDealsS3Snapshot, nil)
 	if err != nil {
 		return nil, err
@@ -203,20 +201,28 @@ func (hf *heyFil) stateMarketDealsViaS3Snapshot(ctx context.Context) (chan State
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
 		return nil, fmt.Errorf("faild to get market deals: %d %s", resp.StatusCode, resp.Status)
 	}
+
+	zstr, err := zstd.NewReader(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to instantiate ZST reader: %w", err)
+	}
+
 	results := make(chan StateMarketDealResult, 1)
 	go func() {
 
 		defer func() {
 			close(results)
+			zstr.Close()
 			_ = resp.Body.Close()
 		}()
 
 		// Process deal information in streaming fashion for a smaller more predictable memory
 		// footprint. Because, it is provided as a giant (currently ~5 GiB) JSON file off S3 usually
 		// and we don't know how big it might grow.
-		decoder := json.NewDecoder(resp.Body)
+		decoder := json.NewDecoder(zstr)
 		dealIDParser := func() (string, error) {
 			token, err := decoder.Token()
 			if err != nil {
