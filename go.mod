@@ -6,6 +6,7 @@ require (
 	github.com/fxamacker/cbor/v2 v2.4.0
 	github.com/ipfs/go-cid v0.3.2
 	github.com/ipfs/go-log/v2 v2.5.1
+	github.com/klauspost/compress v1.15.12
 	github.com/libp2p/go-libp2p v0.25.1
 	github.com/libp2p/go-libp2p-gostream v0.5.0
 	github.com/multiformats/go-multiaddr v0.8.0
@@ -41,7 +42,6 @@ require (
 	github.com/huin/goupnp v1.0.3 // indirect
 	github.com/jackpal/go-nat-pmp v1.0.2 // indirect
 	github.com/jbenet/go-temp-err-catcher v0.1.0 // indirect
-	github.com/klauspost/compress v1.15.12 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.1 // indirect
 	github.com/koron/go-ssdp v0.0.3 // indirect
 	github.com/kr/pretty v0.3.0 // indirect
