@@ -5,12 +5,29 @@ import (
 	"sync"
 )
 
-type dealStats struct {
-	hf                     *heyFil
-	refreshLock            sync.RWMutex
-	dealCountByParticipant map[string]int64
-	latestRefreshErr       error
-}
+const (
+	// filEpochSeconds is the length of one FIL epoch in seconds.
+	// See: https://docs.filecoin.io/reference/general/glossary/#epoch
+	filEpochSeconds = 30
+	// filEpochDay is the number of FIL epochs in one day.
+	filEpochDay = 24 * 60 * 60 / filEpochSeconds
+	// filEpochWeek is the number of FIL epochs in one week.
+	filEpochWeek = 7 * filEpochDay
+)
+
+type (
+	dealStats struct {
+		hf                     *heyFil
+		refreshLock            sync.RWMutex
+		dealCountByParticipant map[string]dealCounts
+		latestRefreshErr       error
+	}
+	dealCounts struct {
+		count           int64
+		countWithinDay  int64
+		countWithinWeek int64
+	}
+)
 
 func (ds *dealStats) start(ctx context.Context) {
 	go func() {
@@ -31,7 +48,8 @@ func (ds *dealStats) refresh(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	epoch := ch.Height
+	currentEpoch := ch.Height
+	logger.Infow("fetched fil chain height", "height", currentEpoch)
 
 	var deals chan StateMarketDealResult
 	if ds.hf.marketDealsFilToolsEnabled {
@@ -43,8 +61,8 @@ func (ds *dealStats) refresh(ctx context.Context) error {
 		return err
 	}
 
-	dealCountByParticipant := make(map[string]int64)
-	var totalDealCount int64
+	dealCountByParticipant := make(map[string]dealCounts)
+	var totalDealCount, totalDealCountWithinWeek, totalDealCountWithinDay int64
 	for {
 		select {
 		case <-ctx.Done():
@@ -55,7 +73,9 @@ func (ds *dealStats) refresh(ctx context.Context) error {
 				ds.dealCountByParticipant = dealCountByParticipant
 				ds.refreshLock.Unlock()
 				ds.hf.metrics.notifyDealCount(totalDealCount)
-				logger.Infow("fetched state market deals", "count", totalDealCount)
+				ds.hf.metrics.notifyDealCountWithinDay(totalDealCountWithinDay)
+				ds.hf.metrics.notifyDealCountWithinWeek(totalDealCountWithinWeek)
+				logger.Infow("fetched state market deals", "count", totalDealCount, "countWithinDay", totalDealCountWithinDay, "countWithinWeek", totalDealCountWithinWeek)
 				return nil
 			}
 			switch {
@@ -63,17 +83,28 @@ func (ds *dealStats) refresh(ctx context.Context) error {
 				return dr.Err
 			case dr.Deal.State.SectorStartEpoch == -1:
 			case dr.Deal.State.SlashEpoch != -1:
-			case dr.Deal.Proposal.EndEpoch < epoch:
+			case dr.Deal.Proposal.EndEpoch < currentEpoch:
 			default:
 				totalDealCount++
-				dealProvider := dr.Deal.Proposal.Provider
-				dealCountByParticipant[dealProvider] = dealCountByParticipant[dealProvider] + 1
+				provider := dr.Deal.Proposal.Provider
+				providerDealCount := dealCountByParticipant[provider]
+				providerDealCount.count++
+				elapsedSinceStartEpoch := currentEpoch - dr.Deal.Proposal.StartEpoch
+				if elapsedSinceStartEpoch < filEpochDay {
+					totalDealCountWithinDay++
+					providerDealCount.countWithinDay++
+				}
+				if elapsedSinceStartEpoch < filEpochWeek {
+					totalDealCountWithinWeek++
+					providerDealCount.countWithinWeek++
+				}
+				dealCountByParticipant[provider] = providerDealCount
 			}
 		}
 	}
 }
 
-func (ds *dealStats) getDealCount(id string) int64 {
+func (ds *dealStats) getDealCounts(id string) dealCounts {
 	ds.refreshLock.RLock()
 	defer ds.refreshLock.RUnlock()
 	return ds.dealCountByParticipant[id]

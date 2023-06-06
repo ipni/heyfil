@@ -34,8 +34,9 @@ type (
 	}
 	StateMarketDeal struct {
 		Proposal struct {
-			Provider string `json:"Provider"`
-			EndEpoch int64  `json:"EndEpoch"`
+			Provider   string `json:"Provider"`
+			StartEpoch int64  `json:"StartEpoch"`
+			EndEpoch   int64  `json:"EndEpoch"`
 		} `json:"Proposal"`
 		State struct {
 			SectorStartEpoch int64 `json:"SectorStartEpoch"`

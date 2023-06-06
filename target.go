@@ -23,7 +23,10 @@ type (
 		HeadProtocol   protocol.ID
 		Head           cid.Cid
 		KnownByIndexer bool
-		DealCount      int64
+
+		DealCount           int64
+		DealCountWithinDay  int64
+		DealCountWithinWeek int64
 	}
 )
 
@@ -48,7 +51,11 @@ const (
 func (t *Target) check(ctx context.Context) *Target {
 	defer func() { t.LastChecked = time.Now() }()
 	logger := logger.With("miner", t.ID)
-	t.DealCount = t.hf.dealStats.getDealCount(t.ID)
+
+	counts := t.hf.dealStats.getDealCounts(t.ID)
+	t.DealCount = counts.count
+	t.DealCountWithinDay = counts.countWithinDay
+	t.DealCountWithinWeek = counts.countWithinWeek
 
 	// Get address for miner ID from FileCoin API.
 	t.AddrInfo, t.Err = t.hf.stateMinerInfo(ctx, t.ID)
