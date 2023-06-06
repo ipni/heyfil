@@ -17,6 +17,8 @@ import (
 var (
 	attributeWithAddress    = attribute.Bool("with-addr", true)
 	attributeKnownByIndexer = attribute.Bool("known-by-indexer", true)
+	attributeSpanDay        = attribute.String("span", "1d")
+	attributeSpanWeek       = attribute.String("span", "1w")
 	attributeWithDeal       = attribute.Bool("with-deal", true)
 )
 
@@ -38,6 +40,10 @@ type metrics struct {
 	// totalDealCount is the total number of state market deals retrieved from FileCoin API  stored
 	// as int64.
 	totalDealCount atomic.Value
+	// totalDealCountWithinWeek is the total number of state market deals made in the last day.
+	totalDealCountWithinDay atomic.Value
+	// totalDealCountWithinWeek is the total number of state market deals made in the last week.
+	totalDealCountWithinWeek atomic.Value
 	// totalAddressableParticipantsWithNonZeroDeals is the total number of state market participants
 	// which: 1) had non-nil peer.AddrInfo on FileCoin API, and 2) have made at least one deal
 	// stored as int64.
@@ -51,15 +57,25 @@ type metrics struct {
 	// totalDealCountByParticipantsKnownToIndexer is the total number of deals made by the state
 	// market participants that are listed as a provider by network indexer stored as int64.
 	totalDealCountByParticipantsKnownToIndexer atomic.Value
+	// totalDealCountWithinDayByParticipantsKnownToIndexer is the total number of deals made by the state
+	// market participants in the last day that are listed as a provider by network indexer stored as int64.
+	totalDealCountWithinDayByParticipantsKnownToIndexer atomic.Value
+	// totalDealCountWithinWeekByParticipantsKnownToIndexer is the total number of deals made by the state
+	// market participants in the last week that are listed as a provider by network indexer stored as int64.
+	totalDealCountWithinWeekByParticipantsKnownToIndexer atomic.Value
 }
 
 func (m *metrics) start() error {
 	m.totalParticipantCount.Store(int64(0))
 	m.totalDealCount.Store(int64(0))
+	m.totalDealCountWithinDay.Store(int64(0))
+	m.totalDealCountWithinWeek.Store(int64(0))
 	m.totalAddressableParticipantsWithNonZeroDeals.Store(int64(0))
 	m.totalAddressableParticipants.Store(int64(0))
 	m.totalParticipantsKnownByIndexer.Store(int64(0))
 	m.totalDealCountByParticipantsKnownToIndexer.Store(int64(0))
+	m.totalDealCountWithinDayByParticipantsKnownToIndexer.Store(int64(0))
+	m.totalDealCountWithinWeekByParticipantsKnownToIndexer.Store(int64(0))
 
 	var err error
 	if m.exporter, err = prometheus.New(prometheus.WithoutUnits()); err != nil {
@@ -92,7 +108,7 @@ func (m *metrics) start() error {
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("The total number of state market deals discovered from FileCoin API. "+
 			"This gauge also offers the total number of deals made by participants that are known to the indexer. "+
-			"See `known-by-indexer`attribute."),
+			"See `known-by-indexer` and `span` attributes."),
 	); err != nil {
 		return err
 	}
@@ -146,6 +162,16 @@ func (m *metrics) reportAsyncMetrics(ctx context.Context) {
 	m.dealsTotal.Observe(ctx, totalDealCount)
 	m.dealsTotal.Observe(ctx, totalDealCountByParticipantsKnownToIndexer, attributeKnownByIndexer)
 
+	totalDealCountWithinDay := m.totalDealCountWithinDay.Load().(int64)
+	totalDealCountWithinDayByParticipantsKnownToIndexer := m.totalDealCountWithinDayByParticipantsKnownToIndexer.Load().(int64)
+	m.dealsTotal.Observe(ctx, totalDealCountWithinDay, attributeSpanDay)
+	m.dealsTotal.Observe(ctx, totalDealCountWithinDayByParticipantsKnownToIndexer, attributeKnownByIndexer, attributeSpanDay)
+
+	totalDealCountWithinWeek := m.totalDealCountWithinWeek.Load().(int64)
+	totalDealCountWithinWeekByParticipantsKnownToIndexer := m.totalDealCountWithinWeekByParticipantsKnownToIndexer.Load().(int64)
+	m.dealsTotal.Observe(ctx, totalDealCountWithinWeek, attributeSpanWeek)
+	m.dealsTotal.Observe(ctx, totalDealCountWithinWeekByParticipantsKnownToIndexer, attributeKnownByIndexer, attributeSpanWeek)
+
 	var dc float64
 	if totalDealCount > 0 {
 		dc = float64(totalDealCountByParticipantsKnownToIndexer) / float64(totalDealCount)
@@ -163,7 +189,9 @@ func (m *metrics) snapshot(targets map[string]*Target) {
 	var totalAddressableParticipants int64
 	var totalAddressableParticipantsWithNonZeroDeals int64
 	var totalParticipantsKnownByIndexer int64
-	var totalDealCountByParticipantsKnownToIndexer int64
+	var totalDealCountByParticipantsKnownToIndexer,
+		totalDealCountWithinDayByParticipantsKnownToIndexer,
+		totalDealCountWithinWeekByParticipantsKnownToIndexer int64
 	countsByStatus := make(map[Status]int64)
 
 	for _, t := range targets {
@@ -173,6 +201,8 @@ func (m *metrics) snapshot(targets map[string]*Target) {
 				if t.KnownByIndexer {
 					totalParticipantsKnownByIndexer++
 					totalDealCountByParticipantsKnownToIndexer += t.DealCount
+					totalDealCountWithinDayByParticipantsKnownToIndexer += t.DealCountWithinDay
+					totalDealCountWithinWeekByParticipantsKnownToIndexer += t.DealCountWithinWeek
 				}
 				totalAddressableParticipantsWithNonZeroDeals++
 			}
@@ -188,6 +218,8 @@ func (m *metrics) snapshot(targets map[string]*Target) {
 	m.totalAddressableParticipantsWithNonZeroDeals.Store(totalAddressableParticipantsWithNonZeroDeals)
 	m.totalParticipantsKnownByIndexer.Store(totalParticipantsKnownByIndexer)
 	m.totalDealCountByParticipantsKnownToIndexer.Store(totalDealCountByParticipantsKnownToIndexer)
+	m.totalDealCountWithinDayByParticipantsKnownToIndexer.Store(totalDealCountWithinDayByParticipantsKnownToIndexer)
+	m.totalDealCountWithinWeekByParticipantsKnownToIndexer.Store(totalDealCountWithinWeekByParticipantsKnownToIndexer)
 }
 
 func (m *metrics) notifyParticipantCount(c int64) {
@@ -196,6 +228,14 @@ func (m *metrics) notifyParticipantCount(c int64) {
 
 func (m *metrics) notifyDealCount(c int64) {
 	m.totalDealCount.Store(c)
+}
+
+func (m *metrics) notifyDealCountWithinWeek(c int64) {
+	m.totalDealCountWithinWeek.Store(c)
+}
+
+func (m *metrics) notifyDealCountWithinDay(c int64) {
+	m.totalDealCountWithinDay.Store(c)
 }
 
 func (m *metrics) shutdown(ctx context.Context) error {
