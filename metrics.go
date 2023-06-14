@@ -30,6 +30,7 @@ type metrics struct {
 	participantsCoverage asyncfloat64.Gauge
 	dealsTotal           asyncint64.Gauge
 	dealsCoverage        asyncfloat64.Gauge
+	unindexedDealCount   asyncint64.Gauge
 
 	countsByStatusLock sync.RWMutex
 	countsByStatus     map[Status]int64
@@ -63,6 +64,8 @@ type metrics struct {
 	// totalDealCountWithinWeekByParticipantsKnownToIndexer is the total number of deals made by the state
 	// market participants in the last week that are listed as a provider by network indexer stored as int64.
 	totalDealCountWithinWeekByParticipantsKnownToIndexer atomic.Value
+	// unindexedTargets maps the miner ID to target information for participants that are not indexed.
+	unindexedTargets map[string]*Target
 }
 
 func (m *metrics) start() error {
@@ -76,6 +79,7 @@ func (m *metrics) start() error {
 	m.totalDealCountByParticipantsKnownToIndexer.Store(int64(0))
 	m.totalDealCountWithinDayByParticipantsKnownToIndexer.Store(int64(0))
 	m.totalDealCountWithinWeekByParticipantsKnownToIndexer.Store(int64(0))
+	m.unindexedTargets = make(map[string]*Target)
 
 	var err error
 	if m.exporter, err = prometheus.New(prometheus.WithoutUnits()); err != nil {
@@ -125,6 +129,14 @@ func (m *metrics) start() error {
 		"ipni/heyfil/state_market_participant_coverage_ratio",
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("The ratio of state market participants covered by the indexer."),
+	); err != nil {
+		return err
+	}
+
+	if m.unindexedDealCount, err = meter.AsyncInt64().Gauge(
+		"ipni/heyfil/state_market_unindexed_deal_count",
+		instrument.WithUnit(unit.Dimensionless),
+		instrument.WithDescription("The number of unindexed deals tagged by their miner ID and deal age span."),
 	); err != nil {
 		return err
 	}
@@ -183,6 +195,13 @@ func (m *metrics) reportAsyncMetrics(ctx context.Context) {
 		pc = float64(totalParticipantsKnownByIndexer) / float64(totalAddressableParticipantsWithDeal)
 	}
 	m.participantsCoverage.Observe(ctx, pc)
+
+	for id, t := range m.unindexedTargets {
+		idAttr := attribute.String("id", id)
+		m.unindexedDealCount.Observe(ctx, t.DealCount, idAttr)
+		m.unindexedDealCount.Observe(ctx, t.DealCountWithinDay, idAttr, attributeSpanDay)
+		m.unindexedDealCount.Observe(ctx, t.DealCountWithinWeek, idAttr, attributeSpanWeek)
+	}
 }
 
 func (m *metrics) snapshot(targets map[string]*Target) {
@@ -207,6 +226,9 @@ func (m *metrics) snapshot(targets map[string]*Target) {
 				totalAddressableParticipantsWithNonZeroDeals++
 			}
 			totalAddressableParticipants++
+		}
+		if t.Status == StatusUnindexed {
+			m.unindexedTargets[t.ID] = t
 		}
 	}
 
