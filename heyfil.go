@@ -47,6 +47,10 @@ func newHeyFil(o ...Option) (*heyFil, error) {
 }
 
 func (hf *heyFil) Start(ctx context.Context) error {
+
+	if err := hf.loadTargets(); err != nil {
+		logger.Warnw("Failed to load targets; continuing operation without pre-existing data.", "err", err)
+	}
 	if err := hf.metrics.start(); err != nil {
 		return err
 	}
@@ -108,9 +112,12 @@ func (hf *heyFil) Start(ctx context.Context) error {
 			select {
 			case <-ctx.Done():
 				return
-			case r := <-hf.checked:
+			case target := <-hf.checked:
 				hf.targetsMutex.Lock()
-				hf.targets[r.ID] = r
+				hf.targets[target.ID] = target
+				if err := hf.store(target); err != nil {
+					logger.Warnw("Failed to store target information", "id", target.ID, "err", err)
+				}
 				hf.targetsMutex.Unlock()
 			case t := <-hf.snapshotInterval.C:
 				snapshot(ctx, t)

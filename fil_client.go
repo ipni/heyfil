@@ -77,23 +77,26 @@ func (hf *heyFil) stateListMiners(ctx context.Context) ([]string, error) {
 	}
 }
 
-func (hf *heyFil) stateMinerInfo(ctx context.Context, mid string) (peer.AddrInfo, error) {
+func (hf *heyFil) stateMinerInfo(ctx context.Context, mid string) (*peer.AddrInfo, error) {
 	var ai peer.AddrInfo
 	resp, err := hf.c.Call(ctx, methodFilStateMinerInfo, mid, nil)
 	switch {
 	case err != nil:
-		return ai, err
+		return nil, err
 	case resp.Error != nil:
-		return ai, resp.Error
+		return nil, resp.Error
 	default:
 		var mi StateMinerInfoResp
 		if err = resp.GetObject(&mi); err != nil {
-			return ai, err
+			return nil, err
+		}
+		if len(mi.PeerId) == 0 && len(mi.Multiaddrs) == 0 {
+			return nil, nil
 		}
 		if len(mi.PeerId) != 0 {
 			var err error
 			if ai.ID, err = peer.Decode(mi.PeerId); err != nil {
-				return ai, err
+				return nil, err
 			}
 		}
 		if len(mi.Multiaddrs) != 0 {
@@ -101,16 +104,16 @@ func (hf *heyFil) stateMinerInfo(ctx context.Context, mid string) (peer.AddrInfo
 			for _, s := range mi.Multiaddrs {
 				mb, err := base64.StdEncoding.DecodeString(s)
 				if err != nil {
-					return ai, err
+					return nil, err
 				}
 				addr, err := multiaddr.NewMultiaddrBytes(mb)
 				if err != nil {
-					return ai, err
+					return nil, err
 				}
 				ai.Addrs = append(ai.Addrs, addr)
 			}
 		}
-		return ai, nil
+		return &ai, nil
 	}
 }
 
