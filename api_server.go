@@ -35,7 +35,9 @@ func (hf *heyFil) startApiServer() error {
 func (hf *heyFil) handleSPRoot(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodOptions:
-		w.Header().Set(httpHeaderAllow(http.MethodGet, http.MethodOptions))
+		w.Header().Set(httpHeaderAllow(http.MethodGet, http.MethodHead, http.MethodOptions))
+	case http.MethodHead:
+		// Do nothing for HEAD request.
 	case http.MethodGet:
 		pid := r.URL.Query().Get("peerid")
 		filterByPeerID := pid != ""
@@ -51,7 +53,7 @@ func (hf *heyFil) handleSPRoot(w http.ResponseWriter, r *http.Request) {
 		hf.targetsMutex.RLock()
 		spIDs := make([]string, 0, len(hf.targets))
 		for id, target := range hf.targets {
-			if filterByPeerID && target.AddrInfo == nil || target.AddrInfo.ID != pidFilter {
+			if filterByPeerID && (target.AddrInfo == nil || target.AddrInfo.ID != pidFilter) {
 				continue
 			}
 			spIDs = append(spIDs, id)
@@ -69,7 +71,9 @@ func (hf *heyFil) handleSPRoot(w http.ResponseWriter, r *http.Request) {
 func (hf *heyFil) handleSPSubtree(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodOptions:
-		w.Header().Set(httpHeaderAllow(http.MethodGet, http.MethodOptions))
+		w.Header().Set(httpHeaderAllow(http.MethodGet, http.MethodHead, http.MethodOptions))
+	case http.MethodHead:
+		// Do nothing for HEAD request.
 	case http.MethodGet:
 		pathSuffix := strings.TrimPrefix(r.URL.Path, "/sp/")
 		switch segments := strings.SplitN(pathSuffix, "/", 3); len(segments) {
@@ -104,7 +108,9 @@ func (hf *heyFil) handleGetSP(w http.ResponseWriter, id string) {
 func handleDefault(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodOptions:
-		w.Header().Set(httpHeaderAllow(http.MethodOptions))
+		w.Header().Set(httpHeaderAllow(http.MethodHead, http.MethodOptions))
+	case http.MethodHead:
+		// Do nothing for HEAD request.
 	default:
 		http.NotFound(w, r)
 	}
