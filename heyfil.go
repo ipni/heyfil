@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/ipfs/go-log/v2"
@@ -14,15 +15,18 @@ var logger = log.Logger("heyfil")
 type (
 	heyFil struct {
 		*options
-		c       jsonrpc.RPCClient
-		targets map[string]*Target
+		c jsonrpc.RPCClient
+
+		targetsMutex sync.RWMutex
+		targets      map[string]*Target
 
 		toCheck chan *Target
 		checked chan *Target
 
-		metrics   metrics
-		dealStats *dealStats
-		server    http.Server
+		metrics       metrics
+		dealStats     *dealStats
+		metricsServer http.Server
+		apiServer     http.Server
 	}
 )
 
@@ -46,7 +50,10 @@ func (hf *heyFil) Start(ctx context.Context) error {
 	if err := hf.metrics.start(); err != nil {
 		return err
 	}
-	if err := hf.startServer(); err != nil {
+	if err := hf.startMetricsServer(); err != nil {
+		return err
+	}
+	if err := hf.startApiServer(); err != nil {
 		return err
 	}
 	hf.dealStats.start(ctx)
@@ -90,8 +97,11 @@ func (hf *heyFil) Start(ctx context.Context) error {
 	go func() {
 		snapshot := func(ctx context.Context, t time.Time) {
 			logger := logger.With("t", t)
+			hf.targetsMutex.RLock()
 			hf.metrics.snapshot(hf.targets)
-			logger.Debugw("reported check results", "miner-count", len(hf.targets))
+			l := len(hf.targets)
+			hf.targetsMutex.RUnlock()
+			logger.Debugw("reported check results", "miner-count", l)
 		}
 		snapshot(ctx, time.Now())
 		for {
@@ -99,7 +109,9 @@ func (hf *heyFil) Start(ctx context.Context) error {
 			case <-ctx.Done():
 				return
 			case r := <-hf.checked:
+				hf.targetsMutex.Lock()
 				hf.targets[r.ID] = r
+				hf.targetsMutex.Unlock()
 			case t := <-hf.snapshotInterval.C:
 				snapshot(ctx, t)
 			}
@@ -127,9 +139,13 @@ func (hf *heyFil) checker(ctx context.Context) {
 }
 func (hf *heyFil) Shutdown(ctx context.Context) error {
 	merr := hf.metrics.shutdown(ctx)
-	serr := hf.shutdownServer(ctx)
+	mserr := hf.shutdownMetricsServer(ctx)
+	aserr := hf.shutdownApiServer(ctx)
 	if merr != nil {
 		return merr
 	}
-	return serr
+	if mserr != nil {
+		return mserr
+	}
+	return aserr
 }

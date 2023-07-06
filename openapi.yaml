@@ -1,0 +1,110 @@
+openapi: 3.0.3
+info:
+  version: 0.0.1
+  title: HeyFil Query API
+  description: API specification for the heyFil SP query service
+servers:
+  - url: http://localhost:8081
+paths:
+  /sp:
+    get:
+      summary: Get all SP IDs, optionally filter by peer ID
+      parameters:
+        - in: query
+          name: peerid
+          schema:
+            type: string
+          description: Optional filter by peer ID
+      responses:
+        '200':
+          description: An array of SP IDs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+        '400':
+          description: Invalid peer ID supplied
+    options:
+      summary: Get allowed methods for /sp endpoint
+      responses:
+        '200':
+          description: Returns allowed methods
+  /sp/{id}:
+    get:
+      summary: Get detailed information about a specific SP by its ID
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: The ID of the SP
+      responses:
+        '200':
+          description: The detailed SP information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  status:
+                    type: integer
+                    enum: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 ]
+                    description: |
+                      The status of the SP, where:
+                      0 = StatusUnknown,
+                      1 = StatusOK,
+                      2 = StatusAPICallFailed,
+                      3 = StatusInternalError,
+                      4 = StatusUnknownRPCError,
+                      5 = StatusNotMiner,
+                      6 = StatusUnreachable,
+                      7 = StatusUnaddressable,
+                      8 = StatusUnindexed,
+                      9 = StatusTopicMismatch,
+                      10 = StatusEmptyHead,
+                      11 = StatusGetHeadError,
+                      12 = StatusAnnounceError,
+                      13 = StatusUnidentifiable,
+                      14 = StatusNoAddrInfo
+                  addr_info:
+                    type: object
+                    properties:
+                      ID:
+                        type: string
+                      Addrs:
+                        type: array
+                        items:
+                          type: string
+                  last_checked:
+                    type: string
+                    format: date-time
+                  err:
+                    type: string
+                  topic:
+                    type: string
+                  head_protocol:
+                    type: string
+                  head:
+                    type: string
+                  known_by_indexer:
+                    type: boolean
+                  deal_count:
+                    type: integer
+                  deal_count_within_day:
+                    type: integer
+                  deal_count_within_week:
+                    type: integer
+        '400':
+          description: SP ID must be specified as URL parameter
+        '404':
+          description: SP not found
+    options:
+      summary: Get allowed methods for /sp/{id} endpoint
+      responses:
+        '200':
+          description: Returns allowed methods
