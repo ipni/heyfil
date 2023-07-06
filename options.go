@@ -20,7 +20,8 @@ type (
 		participantsCheckInterval     *time.Ticker
 		dealStatsRefreshInterval      *time.Ticker
 		snapshotInterval              *time.Ticker
-		serverListenAddr              string
+		metricsListenAddr             string
+		apiListenAddr                 string
 		httpClient                    *http.Client
 		marketDealsS3Snapshot         string
 		marketDealsFilTools           string
@@ -41,7 +42,8 @@ func newOptions(o ...Option) (*options, error) {
 		participantsCheckInterval:     time.NewTicker(1 * time.Hour),
 		snapshotInterval:              time.NewTicker(10 * time.Second),
 		dealStatsRefreshInterval:      time.NewTicker(1 * time.Hour),
-		serverListenAddr:              "0.0.0.0:8080",
+		metricsListenAddr:             "0.0.0.0:8080",
+		apiListenAddr:                 "0.0.0.0:8081",
 	}
 	for _, apply := range o {
 		if err := apply(opts); err != nil {
@@ -114,11 +116,20 @@ func WithSnapshotInterval(t *time.Ticker) Option {
 	}
 }
 
-// WithListenAddr sets the listen address of the HTTP server on which metrics are reported.
+// WithMetricsListenAddr sets the listen address of the HTTP server on which metrics are reported.
 // Defaults to "0.0.0.0:8080
-func WithListenAddr(addr string) Option {
+func WithMetricsListenAddr(addr string) Option {
 	return func(o *options) error {
-		o.serverListenAddr = addr
+		o.metricsListenAddr = addr
+		return nil
+	}
+}
+
+// WithApiListenAddr sets the listen address of the HTTP server on which serves the HeyFil API.
+// Defaults to "0.0.0.0:8081
+func WithApiListenAddr(addr string) Option {
+	return func(o *options) error {
+		o.metricsListenAddr = addr
 		return nil
 	}
 }

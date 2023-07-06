@@ -13,20 +13,20 @@ import (
 type (
 	Status int
 	Target struct {
-		hf             *heyFil
-		ID             string
-		Status         Status
-		AddrInfo       peer.AddrInfo
-		LastChecked    time.Time
-		Err            error
-		Topic          string
-		HeadProtocol   protocol.ID
-		Head           cid.Cid
-		KnownByIndexer bool
+		hf             *heyFil       `json:"-"`
+		ID             string        `json:"id,omitempty"`
+		Status         Status        `json:"status,omitempty"`
+		AddrInfo       peer.AddrInfo `json:"addr_info"`
+		LastChecked    time.Time     `json:"last_checked"`
+		Err            error         `json:"err,omitempty"`
+		Topic          string        `json:"topic,omitempty"`
+		HeadProtocol   protocol.ID   `json:"head_protocol,omitempty"`
+		Head           cid.Cid       `json:"head"`
+		KnownByIndexer bool          `json:"known_by_indexer,omitempty"`
 
-		DealCount           int64
-		DealCountWithinDay  int64
-		DealCountWithinWeek int64
+		DealCount           int64 `json:"deal_count,omitempty"`
+		DealCountWithinDay  int64 `json:"deal_count_within_day,omitempty"`
+		DealCountWithinWeek int64 `json:"deal_count_within_week,omitempty"`
 	}
 )
 

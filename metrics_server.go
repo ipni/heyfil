@@ -8,15 +8,15 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-func (hf *heyFil) startServer() error {
+func (hf *heyFil) startMetricsServer() error {
 	mux := http.NewServeMux()
 	mux.Handle(`/metrics`, promhttp.Handler())
-	hf.server = http.Server{
-		Addr:    hf.serverListenAddr,
+	hf.metricsServer = http.Server{
+		Addr:    hf.metricsListenAddr,
 		Handler: mux,
 	}
 	go func() {
-		err := hf.server.ListenAndServe()
+		err := hf.metricsServer.ListenAndServe()
 		switch {
 		case errors.Is(err, http.ErrServerClosed):
 			logger.Info("server stopped")
@@ -27,6 +27,6 @@ func (hf *heyFil) startServer() error {
 	return nil
 }
 
-func (hf *heyFil) shutdownServer(ctx context.Context) error {
-	return hf.server.Shutdown(ctx)
+func (hf *heyFil) shutdownMetricsServer(ctx context.Context) error {
+	return hf.metricsServer.Shutdown(ctx)
 }
