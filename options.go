@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/http"
+	"path"
 	"regexp"
 	"time"
 
@@ -27,6 +28,7 @@ type (
 		marketDealsFilTools           string
 		marketDealsFilToolsEnabled    bool
 		httpIndexerEndpoint           string
+		storePath                     string
 	}
 )
 
@@ -139,6 +141,21 @@ func WithApiListenAddr(addr string) Option {
 func WithHttpIndexerEndpoint(url string) Option {
 	return func(o *options) error {
 		o.httpIndexerEndpoint = url
+		return nil
+	}
+}
+
+// WithStorePath sets the directory to use for storing the SP data.
+// The stored information is then used to reload the state on service restart if it is present.
+// Defaults to in-memory storage only, which means on each service restart
+// previous SP state is re-populated from scratch.
+func WithStorePath(p string) Option {
+	return func(o *options) error {
+		// Check if path is empty before cleaning it since cleaning an empty path results in ".",
+		// and empty path instead should disable local storage.
+		if p != "" {
+			o.storePath = path.Clean(p)
+		}
 		return nil
 	}
 }

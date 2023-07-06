@@ -13,16 +13,17 @@ import (
 type (
 	Status int
 	Target struct {
-		hf             *heyFil       `json:"-"`
-		ID             string        `json:"id,omitempty"`
-		Status         Status        `json:"status,omitempty"`
-		AddrInfo       peer.AddrInfo `json:"addr_info"`
-		LastChecked    time.Time     `json:"last_checked"`
-		Err            error         `json:"err,omitempty"`
-		Topic          string        `json:"topic,omitempty"`
-		HeadProtocol   protocol.ID   `json:"head_protocol,omitempty"`
-		Head           cid.Cid       `json:"head"`
-		KnownByIndexer bool          `json:"known_by_indexer,omitempty"`
+		hf             *heyFil        `json:"-"`
+		ID             string         `json:"id,omitempty"`
+		Status         Status         `json:"status,omitempty"`
+		AddrInfo       *peer.AddrInfo `json:"addr_info"`
+		LastChecked    time.Time      `json:"last_checked"`
+		ErrMessage     string         `json:"err,omitempty"`
+		Err            error          `json:"-"`
+		Topic          string         `json:"topic,omitempty"`
+		HeadProtocol   protocol.ID    `json:"head_protocol,omitempty"`
+		Head           cid.Cid        `json:"head"`
+		KnownByIndexer bool           `json:"known_by_indexer,omitempty"`
 
 		DealCount           int64 `json:"deal_count,omitempty"`
 		DealCountWithinDay  int64 `json:"deal_count_within_day,omitempty"`
@@ -49,7 +50,13 @@ const (
 )
 
 func (t *Target) check(ctx context.Context) *Target {
-	defer func() { t.LastChecked = time.Now() }()
+
+	defer func() {
+		t.LastChecked = time.Now()
+		if t.Err != nil {
+			t.ErrMessage = t.Err.Error()
+		}
+	}()
 	logger := logger.With("miner", t.ID)
 
 	counts := t.hf.dealStats.getDealCounts(t.ID)
@@ -62,6 +69,9 @@ func (t *Target) check(ctx context.Context) *Target {
 	switch e := t.Err.(type) {
 	case nil:
 		switch {
+		case t.AddrInfo == nil:
+			t.Status = StatusNoAddrInfo
+			return t
 		case t.AddrInfo.ID == "" && len(t.AddrInfo.Addrs) == 0:
 			t.Status = StatusNoAddrInfo
 			return t
@@ -103,7 +113,7 @@ func (t *Target) check(ctx context.Context) *Target {
 
 	// Check if the target is an index provider on the expected topic.
 	var ok bool
-	ok, t.Topic, t.HeadProtocol, t.Err = t.hf.supportsHeadProtocol(ctx, &t.AddrInfo)
+	ok, t.Topic, t.HeadProtocol, t.Err = t.hf.supportsHeadProtocol(ctx, t.AddrInfo)
 	switch {
 	case t.Err != nil:
 		t.Status = StatusUnreachable
@@ -119,14 +129,14 @@ func (t *Target) check(ctx context.Context) *Target {
 	}
 
 	// Check if there is a non-empty head CID and if so announce it.
-	t.Head, t.Err = t.hf.getHead(ctx, &t.AddrInfo, t.HeadProtocol)
+	t.Head, t.Err = t.hf.getHead(ctx, t.AddrInfo, t.HeadProtocol)
 	switch {
 	case t.Err != nil:
 		t.Status = StatusGetHeadError
 	case cid.Undef.Equals(t.Head):
 		t.Status = StatusEmptyHead
 	default:
-		if t.Err = t.hf.announce(ctx, &t.AddrInfo, t.Head); t.Err != nil {
+		if t.Err = t.hf.announce(ctx, t.AddrInfo, t.Head); t.Err != nil {
 			t.Status = StatusAnnounceError
 		} else {
 			t.Status = StatusOK

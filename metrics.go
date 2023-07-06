@@ -215,7 +215,7 @@ func (m *metrics) snapshot(targets map[string]*Target) {
 
 	for _, t := range targets {
 		countsByStatus[t.Status] = countsByStatus[t.Status] + 1
-		if t.AddrInfo.ID != "" && len(t.AddrInfo.Addrs) > 0 {
+		if t.AddrInfo != nil && t.AddrInfo.ID != "" && len(t.AddrInfo.Addrs) > 0 {
 			if t.DealCount > 0 {
 				if t.KnownByIndexer {
 					totalParticipantsKnownByIndexer++
