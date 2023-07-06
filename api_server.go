@@ -51,7 +51,7 @@ func (hf *heyFil) handleSPRoot(w http.ResponseWriter, r *http.Request) {
 		hf.targetsMutex.RLock()
 		spIDs := make([]string, 0, len(hf.targets))
 		for id, target := range hf.targets {
-			if filterByPeerID && target.AddrInfo != nil && target.AddrInfo.ID != pidFilter {
+			if filterByPeerID && target.AddrInfo == nil || target.AddrInfo.ID != pidFilter {
 				continue
 			}
 			spIDs = append(spIDs, id)
