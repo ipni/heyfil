@@ -28,8 +28,6 @@ var (
 	attributeSpanDay        = attribute.String("span", "1d")
 	attributeSpanWeek       = attribute.String("span", "1w")
 	attributeWithDeal       = attribute.Bool("with-deal", true)
-
-	zeroBigInt = big.NewInt(0)
 )
 
 type metrics struct {
@@ -333,10 +331,10 @@ func (m *metrics) snapshot(targets map[string]*Target) {
 			if t.supportsProtocolID(filStorageMarket_1_2_0) {
 				totalBoostNodes++
 				if qap, ok := big.NewInt(0).SetString(t.StateMinerPower.MinerPower.QualityAdjPower, 10); ok {
-					totalBoostQualityAdjustedPower.Add(zeroBigInt, qap)
+					totalBoostQualityAdjustedPower = big.NewInt(0).Add(totalBoostQualityAdjustedPower, qap)
 				}
 				if rbp, ok := big.NewInt(0).SetString(t.StateMinerPower.MinerPower.RawBytePower, 10); ok {
-					totalBoostRawPower.Add(zeroBigInt, rbp)
+					totalBoostRawPower = big.NewInt(0).Add(totalBoostRawPower, rbp)
 				}
 			}
 		}
