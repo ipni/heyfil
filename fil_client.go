@@ -24,6 +24,15 @@ type (
 		PeerId     string   `json:"PeerId"`
 		Multiaddrs []string `json:"Multiaddrs"`
 	}
+	StateMinerPowerResp struct {
+		HasMinPower bool  `json:"HasMinPower"`
+		MinerPower  Claim `json:"MinerPower"`
+		TotalPower  Claim `json:"TotalPower"`
+	}
+	Claim struct {
+		QualityAdjPower string `json:"QualityAdjPower"`
+		RawBytePower    string `json:"RawBytePower"`
+	}
 	ChainHead struct {
 		Height int64 `json:"Height"`
 	}
@@ -54,6 +63,7 @@ type (
 const (
 	methodFilStateListMiners = `Filecoin.StateListMiners`
 	methodFilStateMinerInfo  = `Filecoin.StateMinerInfo`
+	methodFilStateMinerPower = `Filecoin.StateMinerPower`
 	methodFilChainHead       = `Filecoin.ChainHead`
 
 	// noopURL is a placeholder for mandatory but noop URL required by HTTP client during go-stream
@@ -74,6 +84,22 @@ func (hf *heyFil) stateListMiners(ctx context.Context) ([]string, error) {
 			return nil, err
 		}
 		return mids, nil
+	}
+}
+
+func (hf *heyFil) stateMinerPower(ctx context.Context, mid string) (*StateMinerPowerResp, error) {
+	resp, err := hf.c.Call(ctx, methodFilStateMinerPower, mid, nil)
+	switch {
+	case err != nil:
+		return nil, err
+	case resp.Error != nil:
+		return nil, resp.Error
+	default:
+		var mp StateMinerPowerResp
+		if err = resp.GetObject(&mp); err != nil {
+			return nil, err
+		}
+		return &mp, nil
 	}
 }
 
@@ -286,23 +312,6 @@ func (hf *heyFil) stateMarketDealsViaS3Snapshot(ctx context.Context) (chan State
 		}
 	}()
 	return results, nil
-}
-
-func (hf *heyFil) supportsHeadProtocol(ctx context.Context, ai *peer.AddrInfo) (bool, string, protocol.ID, error) {
-	if err := hf.h.Connect(ctx, *ai); err != nil {
-		return false, "", "", err
-	}
-	pids, err := hf.h.Peerstore().GetProtocols(ai.ID)
-	if err != nil {
-		return false, "", "", err
-	}
-	for _, pid := range pids {
-		ok, topic := hf.findHeadProtocolMatches(string(pid))
-		if ok {
-			return true, topic, pid, nil
-		}
-	}
-	return false, "", "", nil
 }
 
 func (hf *heyFil) findHeadProtocolMatches(pid string) (bool, string) {

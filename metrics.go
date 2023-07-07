@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"math/big"
 	"sync"
 	"sync/atomic"
 
@@ -14,26 +15,45 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric"
 )
 
+const (
+	filStorageMarket_1_0_1 = "/fil/storage/mk/1.0.1"
+	filStorageMarket_1_1_0 = "/fil/storage/mk/1.1.0"
+	filStorageMarket_1_1_1 = "/fil/storage/mk/1.1.1"
+	filStorageMarket_1_2_0 = "/fil/storage/mk/1.2.0"
+)
+
 var (
 	attributeWithAddress    = attribute.Bool("with-addr", true)
 	attributeKnownByIndexer = attribute.Bool("known-by-indexer", true)
 	attributeSpanDay        = attribute.String("span", "1d")
 	attributeSpanWeek       = attribute.String("span", "1w")
 	attributeWithDeal       = attribute.Bool("with-deal", true)
+
+	zeroBigInt = big.NewInt(0)
 )
 
 type metrics struct {
 	exporter *prometheus.Exporter
 
-	participantsByStatus asyncint64.Gauge
-	participantsTotal    asyncint64.Gauge
-	participantsCoverage asyncfloat64.Gauge
-	dealsTotal           asyncint64.Gauge
-	dealsCoverage        asyncfloat64.Gauge
-	unindexedDealCount   asyncint64.Gauge
+	participantsByStatus            asyncint64.Gauge
+	participantsByAgentShortVersion asyncint64.Gauge
+	participantsByMarketProtocol    asyncint64.Gauge
+	participantsByTransportProtocol asyncint64.Gauge
+	participantsTotal               asyncint64.Gauge
+	participantsCoverage            asyncfloat64.Gauge
+	dealsTotal                      asyncint64.Gauge
+	dealsCoverage                   asyncfloat64.Gauge
+	unindexedDealCount              asyncint64.Gauge
+	boostParticipantsTotal          asyncint64.Gauge
+	boostQualityAdjustedPowerTotal  asyncint64.Gauge
+	boostRawPowerTotal              asyncint64.Gauge
+	participantsWithMinPowerTotal   asyncint64.Gauge
 
-	countsByStatusLock sync.RWMutex
-	countsByStatus     map[Status]int64
+	countsMutex               sync.RWMutex
+	countsByStatus            map[Status]int64
+	countsByAgentShortVersion map[string]int64
+	countsByMarketProtocol    map[string]int64
+	countsByTransportProtocol map[string]int64
 
 	// totalParticipantCount is the total number of state market participants retrieved from
 	// FileCoin API stored as int64.
@@ -64,6 +84,10 @@ type metrics struct {
 	// totalDealCountWithinWeekByParticipantsKnownToIndexer is the total number of deals made by the state
 	// market participants in the last week that are listed as a provider by network indexer stored as int64.
 	totalDealCountWithinWeekByParticipantsKnownToIndexer atomic.Value
+	totalBoostParticipants                               atomic.Value
+	totalParticipantsWithMinPower                        atomic.Value
+	totalBoostQualityAdjustedPower                       atomic.Value
+	totalBoostRawPower                                   atomic.Value
 	// unindexedTargets maps the miner ID to target information for participants that are not indexed.
 	unindexedTargets map[string]*Target
 }
@@ -79,6 +103,10 @@ func (m *metrics) start() error {
 	m.totalDealCountByParticipantsKnownToIndexer.Store(int64(0))
 	m.totalDealCountWithinDayByParticipantsKnownToIndexer.Store(int64(0))
 	m.totalDealCountWithinWeekByParticipantsKnownToIndexer.Store(int64(0))
+	m.totalBoostParticipants.Store(int64(0))
+	m.totalParticipantsWithMinPower.Store(int64(0))
+	m.totalBoostQualityAdjustedPower.Store(big.NewInt(0))
+	m.totalBoostRawPower.Store(big.NewInt(0))
 	m.unindexedTargets = make(map[string]*Target)
 
 	var err error
@@ -92,6 +120,27 @@ func (m *metrics) start() error {
 		"ipni/heyfil/miners_by_status",
 		instrument.WithUnit(unit.Dimensionless),
 		instrument.WithDescription("The state markets participants count by status."),
+	); err != nil {
+		return err
+	}
+	if m.participantsByAgentShortVersion, err = meter.AsyncInt64().Gauge(
+		"ipni/heyfil/miners_by_agent_short_version",
+		instrument.WithUnit(unit.Dimensionless),
+		instrument.WithDescription("The state markets participants count by shortened agent version of their libp2p host."),
+	); err != nil {
+		return err
+	}
+	if m.participantsByMarketProtocol, err = meter.AsyncInt64().Gauge(
+		"ipni/heyfil/miners_by_market_protocol",
+		instrument.WithUnit(unit.Dimensionless),
+		instrument.WithDescription("The state markets participants count by markets protocol version."),
+	); err != nil {
+		return err
+	}
+	if m.participantsByTransportProtocol, err = meter.AsyncInt64().Gauge(
+		"ipni/heyfil/miners_by_transport_protocol",
+		instrument.WithUnit(unit.Dimensionless),
+		instrument.WithDescription("The state markets participants count by transports protocol name."),
 	); err != nil {
 		return err
 	}
@@ -140,6 +189,34 @@ func (m *metrics) start() error {
 	); err != nil {
 		return err
 	}
+	if m.boostParticipantsTotal, err = meter.AsyncInt64().Gauge(
+		"ipni/heyfil/state_market_boost_participants_total",
+		instrument.WithUnit(unit.Dimensionless),
+		instrument.WithDescription("The total number of participants running Boost."),
+	); err != nil {
+		return err
+	}
+	if m.boostQualityAdjustedPowerTotal, err = meter.AsyncInt64().Gauge(
+		"ipni/heyfil/state_market_boost_quality_adjusted_power_total",
+		instrument.WithUnit(unit.Dimensionless),
+		instrument.WithDescription("The total quality adjusted power across participants that are running Boost."),
+	); err != nil {
+		return err
+	}
+	if m.boostRawPowerTotal, err = meter.AsyncInt64().Gauge(
+		"ipni/heyfil/state_market_boost_raw_power_total",
+		instrument.WithUnit(unit.Dimensionless),
+		instrument.WithDescription("The total raw power across participants that are running Boost."),
+	); err != nil {
+		return err
+	}
+	if m.participantsWithMinPowerTotal, err = meter.AsyncInt64().Gauge(
+		"ipni/heyfil/state_market_participants_with_min_power_total",
+		instrument.WithUnit(unit.Dimensionless),
+		instrument.WithDescription("The total number of participants with min power."),
+	); err != nil {
+		return err
+	}
 
 	return meter.RegisterCallback(
 		[]instrument.Asynchronous{
@@ -154,11 +231,20 @@ func (m *metrics) start() error {
 }
 
 func (m *metrics) reportAsyncMetrics(ctx context.Context) {
-	m.countsByStatusLock.RLock()
+	m.countsMutex.RLock()
 	for status, c := range m.countsByStatus {
 		m.participantsByStatus.Observe(ctx, c, targetStatusToAttribute(status))
 	}
-	m.countsByStatusLock.RUnlock()
+	for agent, c := range m.countsByAgentShortVersion {
+		m.participantsByAgentShortVersion.Observe(ctx, c, attribute.String("agentShortVersion", agent))
+	}
+	for mp, c := range m.countsByMarketProtocol {
+		m.participantsByMarketProtocol.Observe(ctx, c, attribute.String("protocol", mp))
+	}
+	for tp, c := range m.countsByTransportProtocol {
+		m.participantsByTransportProtocol.Observe(ctx, c, attribute.String("transportName", tp))
+	}
+	m.countsMutex.RUnlock()
 
 	totalParticipants := m.totalParticipantCount.Load().(int64)
 	totalParticipantsKnownByIndexer := m.totalParticipantsKnownByIndexer.Load().(int64)
@@ -202,19 +288,31 @@ func (m *metrics) reportAsyncMetrics(ctx context.Context) {
 		m.unindexedDealCount.Observe(ctx, t.DealCountWithinDay, idAttr, attributeSpanDay)
 		m.unindexedDealCount.Observe(ctx, t.DealCountWithinWeek, idAttr, attributeSpanWeek)
 	}
+
+	m.boostParticipantsTotal.Observe(ctx, m.totalBoostParticipants.Load().(int64))
+	m.boostQualityAdjustedPowerTotal.Observe(ctx, m.totalBoostQualityAdjustedPower.Load().(*big.Int).Int64())
+	m.boostRawPowerTotal.Observe(ctx, m.totalBoostRawPower.Load().(*big.Int).Int64())
+	m.participantsWithMinPowerTotal.Observe(ctx, m.totalParticipantsWithMinPower.Load().(int64))
+
 }
 
 func (m *metrics) snapshot(targets map[string]*Target) {
-	var totalAddressableParticipants int64
-	var totalAddressableParticipantsWithNonZeroDeals int64
-	var totalParticipantsKnownByIndexer int64
-	var totalDealCountByParticipantsKnownToIndexer,
+	var totalAddressableParticipants,
+		totalAddressableParticipantsWithNonZeroDeals,
+		totalParticipantsKnownByIndexer,
+		totalDealCountByParticipantsKnownToIndexer,
 		totalDealCountWithinDayByParticipantsKnownToIndexer,
-		totalDealCountWithinWeekByParticipantsKnownToIndexer int64
+		totalDealCountWithinWeekByParticipantsKnownToIndexer,
+		totalBoostNodes,
+		totalWithMinPower int64
+	totalBoostQualityAdjustedPower, totalBoostRawPower := big.NewInt(0), big.NewInt(0)
 	countsByStatus := make(map[Status]int64)
+	countsByAgentShortVersion := make(map[string]int64)
+	countsByMarketProtocol := make(map[string]int64)
+	countsByTransportProtocol := make(map[string]int64)
 
 	for _, t := range targets {
-		countsByStatus[t.Status] = countsByStatus[t.Status] + 1
+		countsByStatus[t.Status]++
 		if t.AddrInfo != nil && t.AddrInfo.ID != "" && len(t.AddrInfo.Addrs) > 0 {
 			if t.DealCount > 0 {
 				if t.KnownByIndexer {
@@ -230,11 +328,46 @@ func (m *metrics) snapshot(targets map[string]*Target) {
 		if t.Status == StatusUnindexed {
 			m.unindexedTargets[t.ID] = t
 		}
+		if t.StateMinerPower != nil && t.StateMinerPower.HasMinPower {
+			totalWithMinPower++
+			if t.supportsProtocolID(filStorageMarket_1_2_0) {
+				totalBoostNodes++
+				if qap, ok := big.NewInt(0).SetString(t.StateMinerPower.MinerPower.QualityAdjPower, 10); ok {
+					totalBoostQualityAdjustedPower.Add(zeroBigInt, qap)
+				}
+				if rbp, ok := big.NewInt(0).SetString(t.StateMinerPower.MinerPower.RawBytePower, 10); ok {
+					totalBoostRawPower.Add(zeroBigInt, rbp)
+				}
+			}
+		}
+		if t.AgentShortVersion != "" {
+			countsByAgentShortVersion[t.AgentShortVersion]++
+		}
+		if t.supportsProtocolID(filStorageMarket_1_0_1) {
+			countsByMarketProtocol[filStorageMarket_1_0_1]++
+		}
+		if t.supportsProtocolID(filStorageMarket_1_1_0) {
+			countsByMarketProtocol[filStorageMarket_1_1_0]++
+		}
+		if t.supportsProtocolID(filStorageMarket_1_1_1) {
+			countsByMarketProtocol[filStorageMarket_1_1_1]++
+		}
+		if t.supportsProtocolID(filStorageMarket_1_2_0) {
+			countsByMarketProtocol[filStorageMarket_1_2_0]++
+		}
+		if t.Transports != nil {
+			for _, protocol := range t.Transports.Protocols {
+				countsByTransportProtocol[protocol.Name]++
+			}
+		}
 	}
 
-	m.countsByStatusLock.Lock()
+	m.countsMutex.Lock()
 	m.countsByStatus = countsByStatus
-	defer m.countsByStatusLock.Unlock()
+	m.countsByAgentShortVersion = countsByAgentShortVersion
+	m.countsByMarketProtocol = countsByMarketProtocol
+	m.countsByTransportProtocol = countsByTransportProtocol
+	defer m.countsMutex.Unlock()
 
 	m.totalAddressableParticipants.Store(totalAddressableParticipants)
 	m.totalAddressableParticipantsWithNonZeroDeals.Store(totalAddressableParticipantsWithNonZeroDeals)
@@ -242,6 +375,10 @@ func (m *metrics) snapshot(targets map[string]*Target) {
 	m.totalDealCountByParticipantsKnownToIndexer.Store(totalDealCountByParticipantsKnownToIndexer)
 	m.totalDealCountWithinDayByParticipantsKnownToIndexer.Store(totalDealCountWithinDayByParticipantsKnownToIndexer)
 	m.totalDealCountWithinWeekByParticipantsKnownToIndexer.Store(totalDealCountWithinWeekByParticipantsKnownToIndexer)
+	m.totalBoostParticipants.Store(totalBoostNodes)
+	m.totalParticipantsWithMinPower.Store(totalWithMinPower)
+	m.totalBoostQualityAdjustedPower.Store(totalBoostQualityAdjustedPower)
+	m.totalBoostRawPower.Store(totalBoostRawPower)
 }
 
 func (m *metrics) notifyParticipantCount(c int64) {

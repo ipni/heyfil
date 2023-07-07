@@ -14,7 +14,10 @@ paths:
           name: peerid
           schema:
             type: string
-          description: Optional filter by peer ID
+          description: |
+            Optional filter by peer ID. The filter is applied to all peer IDs exposed by the SP. 
+            These include SP peer ID, and all peer IDs listed under SP's supported transports protocols
+            queried via `/fil/retrieval/transports/1.0.0` protocol ID. 
       responses:
         '200':
           description: An array of SP IDs
@@ -83,7 +86,7 @@ paths:
                   last_checked:
                     type: string
                     format: date-time
-                  err:
+                  err_message:
                     type: string
                   topic:
                     type: string
@@ -93,6 +96,49 @@ paths:
                     type: string
                   known_by_indexer:
                     type: boolean
+                  protocols:
+                    type: array
+                    items:
+                      type: string
+                  agent_version:
+                    type: string
+                    description: The full libp2p AgentVersion.
+                  agent_short_version:
+                    type: string
+                    description: The shortened libp2p AgentVersion
+                  transports:
+                    type: object
+                    properties:
+                      protocols:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            name:
+                              type: string
+                            addresses:
+                              type: array
+                              items:
+                                type: string
+                  state_miner_power:
+                    type: object
+                    properties:
+                      HasMinPower:
+                        type: boolean
+                      MinerPower:
+                        type: object
+                        properties:
+                          QualityAdjPower:
+                            type: string
+                          RawBytePower:
+                            type: string
+                      TotalPower:
+                        type: object
+                        properties:
+                          QualityAdjPower:
+                            type: string
+                          RawBytePower:
+                            type: string
                   deal_count:
                     type: integer
                   deal_count_within_day:
