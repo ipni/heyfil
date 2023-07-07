@@ -29,6 +29,7 @@ type (
 		marketDealsFilToolsEnabled    bool
 		httpIndexerEndpoint           string
 		storePath                     string
+		queryTransportsTimeout        time.Duration
 	}
 )
 
@@ -46,6 +47,7 @@ func newOptions(o ...Option) (*options, error) {
 		dealStatsRefreshInterval:      time.NewTicker(1 * time.Hour),
 		metricsListenAddr:             "0.0.0.0:8080",
 		apiListenAddr:                 "0.0.0.0:8081",
+		queryTransportsTimeout:        10 * time.Second,
 	}
 	for _, apply := range o {
 		if err := apply(opts); err != nil {

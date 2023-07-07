@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"regexp"
 	"time"
 
 	"github.com/ipfs/go-cid"
@@ -10,20 +11,27 @@ import (
 	"github.com/ybbus/jsonrpc/v3"
 )
 
+var agentShortVersionPattern = regexp.MustCompile(`^(.+)\+.*`)
+
 type (
 	Status int
 	Target struct {
-		hf             *heyFil        `json:"-"`
-		ID             string         `json:"id,omitempty"`
-		Status         Status         `json:"status,omitempty"`
-		AddrInfo       *peer.AddrInfo `json:"addr_info"`
-		LastChecked    time.Time      `json:"last_checked"`
-		ErrMessage     string         `json:"err,omitempty"`
-		Err            error          `json:"-"`
-		Topic          string         `json:"topic,omitempty"`
-		HeadProtocol   protocol.ID    `json:"head_protocol,omitempty"`
-		Head           cid.Cid        `json:"head"`
-		KnownByIndexer bool           `json:"known_by_indexer,omitempty"`
+		hf                *heyFil                  `json:"-"`
+		ID                string                   `json:"id,omitempty"`
+		Status            Status                   `json:"status,omitempty"`
+		AddrInfo          *peer.AddrInfo           `json:"addr_info,omitempty"`
+		LastChecked       time.Time                `json:"last_checked,omitempty"`
+		ErrMessage        string                   `json:"err,omitempty"`
+		Err               error                    `json:"-"`
+		Topic             string                   `json:"topic,omitempty"`
+		HeadProtocol      protocol.ID              `json:"head_protocol,omitempty"`
+		Head              cid.Cid                  `json:"head,omitempty"`
+		KnownByIndexer    bool                     `json:"known_by_indexer,omitempty"`
+		Protocols         []protocol.ID            `json:"protocols,omitempty"`
+		AgentVersion      string                   `json:"agent_version,omitempty"`
+		AgentShortVersion string                   `json:"agent_short_version,omitempty"`
+		Transports        *TransportsQueryResponse `json:"transports,omitempty"`
+		StateMinerPower   *StateMinerPowerResp     `json:"state_miner_power,omitempty"`
 
 		DealCount           int64 `json:"deal_count,omitempty"`
 		DealCountWithinDay  int64 `json:"deal_count_within_day,omitempty"`
@@ -64,6 +72,15 @@ func (t *Target) check(ctx context.Context) *Target {
 	t.DealCountWithinDay = counts.countWithinDay
 	t.DealCountWithinWeek = counts.countWithinWeek
 
+	// Get state miner power
+	t.StateMinerPower, t.Err = t.hf.stateMinerPower(ctx, t.ID)
+	if t.Err != nil {
+		logger.Warnw("Failed to get state miner power", "err", t.Err)
+		// Reset target error and proceed. Because, there are other checks to do and we
+		// care less about recording this failure relative to other ones.
+		t.Err = nil
+	}
+
 	// Get address for miner ID from FileCoin API.
 	t.AddrInfo, t.Err = t.hf.stateMinerInfo(ctx, t.ID)
 	switch e := t.Err.(type) {
@@ -83,6 +100,7 @@ func (t *Target) check(ctx context.Context) *Target {
 			return t
 		default:
 			logger.Debugw("Discovered Addrs for miner", "addrs", t.AddrInfo)
+			logger = logger.With("peerID", t.AddrInfo.ID)
 		}
 	case *jsonrpc.HTTPError:
 		logger.Debugw("HTTP error while getting state miner info", "status", e.Code, "err", t.Err)
@@ -111,26 +129,54 @@ func (t *Target) check(ctx context.Context) *Target {
 		logger.Errorw("failed to check if target is known by indexer", "err", err)
 	}
 
-	// Check if the target is an index provider on the expected topic.
-	var ok bool
-	ok, t.Topic, t.HeadProtocol, t.Err = t.hf.supportsHeadProtocol(ctx, t.AddrInfo)
-	switch {
-	case t.Err != nil:
+	if t.Err = t.hf.h.Connect(ctx, *t.AddrInfo); t.Err != nil {
 		t.Status = StatusUnreachable
 		return t
-	case !ok:
-		t.Status = StatusUnindexed
+	}
+	if t.Protocols, t.Err = t.hf.h.Peerstore().GetProtocols(t.AddrInfo.ID); t.Err != nil {
+		t.Status = StatusUnreachable
 		return t
-	default:
-		if t.Topic != t.hf.topic {
-			t.Status = StatusTopicMismatch
-			return t
+	}
+
+	// Get the remote peer agent version, but proceed with other checks if we fail to get it.
+	var ok bool
+	if anyAgentVersion, err := t.hf.h.Peerstore().Get(t.AddrInfo.ID, "AgentVersion"); err != nil {
+		logger.Warnw("Failed to get agent version", "err", err)
+	} else if t.AgentVersion, ok = anyAgentVersion.(string); ok {
+		t.AgentShortVersion = agentShortVersionPattern.ReplaceAllString(t.AgentVersion, "$1")
+	} else if !ok {
+		logger.Warnw("Non-string agent version", "agentVersion", anyAgentVersion)
+	}
+
+	if t.supportsProtocolID(transportsProtocolID) {
+		// Do not populate t.Err with the error that may be returned by queryTransports.
+		// Instead, silently proceed to IPNI related head checking, etc.
+		tctx, cancel := context.WithTimeout(ctx, t.hf.queryTransportsTimeout)
+		defer cancel()
+		if t.Transports, err = t.hf.queryTransports(tctx, t.AddrInfo.ID); err != nil {
+			logger.Warnw("Failed to query transports", "err", err)
 		}
 	}
 
+	// Check if the target is an index provider on the expected topic.
+	var supportsHeadProtocol bool
+	for _, pid := range t.Protocols {
+		if supportsHeadProtocol, t.Topic = t.hf.findHeadProtocolMatches(string(pid)); supportsHeadProtocol {
+			t.HeadProtocol = pid
+			break
+		}
+	}
+	if !supportsHeadProtocol {
+		t.Status = StatusUnindexed
+		return t
+	}
+	if t.Topic != t.hf.topic {
+		t.Status = StatusTopicMismatch
+		return t
+	}
+
 	// Check if there is a non-empty head CID and if so announce it.
-	t.Head, t.Err = t.hf.getHead(ctx, t.AddrInfo, t.HeadProtocol)
-	switch {
+	switch t.Head, t.Err = t.hf.getHead(ctx, t.AddrInfo, t.HeadProtocol); {
 	case t.Err != nil:
 		t.Status = StatusGetHeadError
 	case cid.Undef.Equals(t.Head):
@@ -143,4 +189,31 @@ func (t *Target) check(ctx context.Context) *Target {
 		}
 	}
 	return t
+}
+
+func (t *Target) hasPeerID(pid peer.ID) bool {
+	switch {
+	case t.AddrInfo != nil && t.AddrInfo.ID == pid:
+		return true
+	case t.Transports != nil:
+		for _, tp := range t.Transports.Protocols {
+			for _, ma := range tp.Addresses {
+				if addr, err := peer.AddrInfoFromP2pAddr(ma); err != nil {
+					continue
+				} else if addr.ID == pid {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func (t *Target) supportsProtocolID(pid protocol.ID) bool {
+	for _, id := range t.Protocols {
+		if id == pid {
+			return true
+		}
+	}
+	return false
 }
