@@ -24,8 +24,11 @@ type (
 	}
 	dealCounts struct {
 		count           int64
+		bytes           int64
 		countWithinDay  int64
+		bytesWithinDay  int64
 		countWithinWeek int64
+		bytesWithinWeek int64
 	}
 )
 
@@ -89,14 +92,17 @@ func (ds *dealStats) refresh(ctx context.Context) error {
 				provider := dr.Deal.Proposal.Provider
 				providerDealCount := dealCountByParticipant[provider]
 				providerDealCount.count++
+				providerDealCount.bytes += dr.Deal.Proposal.PieceSize
 				elapsedSinceStartEpoch := currentEpoch - dr.Deal.Proposal.StartEpoch
 				if elapsedSinceStartEpoch < filEpochDay {
 					totalDealCountWithinDay++
 					providerDealCount.countWithinDay++
+					providerDealCount.bytesWithinDay += dr.Deal.Proposal.PieceSize
 				}
 				if elapsedSinceStartEpoch < filEpochWeek {
 					totalDealCountWithinWeek++
 					providerDealCount.countWithinWeek++
+					providerDealCount.bytesWithinWeek += dr.Deal.Proposal.PieceSize
 				}
 				dealCountByParticipant[provider] = providerDealCount
 			}
