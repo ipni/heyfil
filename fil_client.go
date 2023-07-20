@@ -46,6 +46,7 @@ type (
 			Provider   string `json:"Provider"`
 			StartEpoch int64  `json:"StartEpoch"`
 			EndEpoch   int64  `json:"EndEpoch"`
+			PieceSize  int64  `json:"PieceSize"`
 		} `json:"Proposal"`
 		State struct {
 			SectorStartEpoch int64 `json:"SectorStartEpoch"`
