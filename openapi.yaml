@@ -18,6 +18,13 @@ paths:
             Optional filter by peer ID. The filter is applied to all peer IDs exposed by the SP. 
             These include SP peer ID, and all peer IDs listed under SP's supported transports protocols
             queried via `/fil/retrieval/transports/1.0.0` protocol ID. 
+        - in: query
+          name: status
+          schema:
+            type: string
+          description: |
+            Optional filter by status number. The filter is negated if it begins with "!".
+            For example, the value "!14" will select miner IDs the status of which does not match StatusNoAddrInfo.
       responses:
         '200':
           description: An array of SP IDs
