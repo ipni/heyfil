@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -50,10 +51,28 @@ func (hf *heyFil) handleSPRoot(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		status := r.URL.Query().Get("status")
+		filterByStatus := status != ""
+		var statusFilter func(t *Target) bool
+		if filterByStatus {
+			statusNum := strings.TrimPrefix(status, "!")
+			negate := status != statusNum
+			statusTarget, err := strconv.ParseInt(statusNum, 10, 32)
+			if err != nil {
+				http.Error(w, `The "status" query parameter cannot be parsed.`, http.StatusBadRequest)
+				return
+			}
+			statusFilter = func(t *Target) bool {
+				return (t.Status == Status(statusTarget)) != negate
+			}
+		}
 		hf.targetsMutex.RLock()
 		spIDs := make([]string, 0, len(hf.targets))
 		for id, target := range hf.targets {
 			if filterByPeerID && !target.hasPeerID(pidFilter) {
+				continue
+			}
+			if statusFilter != nil && !statusFilter(target) {
 				continue
 			}
 			spIDs = append(spIDs, id)
