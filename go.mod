@@ -1,6 +1,6 @@
 module github.com/ipni/heyfil
 
-go 1.19
+go 1.20
 
 // ploydawn/refmt used by go-ipld-prime needs to upgrade for this to go away. See:
 //  - https://github.com/polydawn/refmt/blob/master/go.mod#L7
