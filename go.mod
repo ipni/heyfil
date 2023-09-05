@@ -2,10 +2,6 @@ module github.com/ipni/heyfil
 
 go 1.20
 
-// ploydawn/refmt used by go-ipld-prime needs to upgrade for this to go away. See:
-//  - https://github.com/polydawn/refmt/blob/master/go.mod#L7
-replace github.com/smartystreets/assertions => github.com/smarty/assertions v1.2.0
-
 require (
 	github.com/fxamacker/cbor/v2 v2.4.0
 	github.com/ipfs/go-cid v0.4.1
@@ -48,7 +44,6 @@ require (
 	github.com/huin/goupnp v1.2.0 // indirect
 	github.com/jackpal/go-nat-pmp v1.0.2 // indirect
 	github.com/jbenet/go-temp-err-catcher v0.1.0 // indirect
-	github.com/jtolds/gls v4.20.0+incompatible // indirect
 	github.com/klauspost/cpuid/v2 v2.2.5 // indirect
 	github.com/koron/go-ssdp v0.0.4 // indirect
 	github.com/libp2p/go-buffer-pool v0.1.0 // indirect
@@ -81,7 +76,7 @@ require (
 	github.com/opencontainers/runtime-spec v1.1.0 // indirect
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/polydawn/refmt v0.0.0-20201211092308-30ac6d18308e // indirect
+	github.com/polydawn/refmt v0.89.1-0.20230901193137-b653515a8164 // indirect
 	github.com/prometheus/client_model v0.4.0 // indirect
 	github.com/prometheus/common v0.44.0 // indirect
 	github.com/prometheus/procfs v0.11.1 // indirect
@@ -90,7 +85,6 @@ require (
 	github.com/quic-go/quic-go v0.38.0 // indirect
 	github.com/quic-go/webtransport-go v0.5.3 // indirect
 	github.com/raulk/go-watchdog v1.3.0 // indirect
-	github.com/smartystreets/assertions v0.0.0-00010101000000-000000000000 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	go.opentelemetry.io/otel/sdk v1.13.0 // indirect
