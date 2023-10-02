@@ -20,6 +20,9 @@ type (
 		targetsMutex sync.RWMutex
 		targets      map[string]*Target
 
+		recentPiecesMutex sync.RWMutex
+		recentPieces      recentPieces
+
 		toCheck chan *Target
 		checked chan *Target
 
@@ -50,6 +53,9 @@ func (hf *heyFil) Start(ctx context.Context) error {
 
 	if err := hf.loadTargets(); err != nil {
 		logger.Warnw("Failed to load targets; continuing operation without pre-existing data.", "err", err)
+	}
+	if err := hf.loadRecentPieces(); err != nil {
+		logger.Warnw("Failed to load recent pieces; continuing operation without pre-existing data.", "err", err)
 	}
 	if err := hf.metrics.start(); err != nil {
 		return err

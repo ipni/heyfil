@@ -65,6 +65,10 @@ func (ds *dealStats) refresh(ctx context.Context) error {
 	}
 
 	dealCountByParticipant := make(map[string]dealCounts)
+	latestPieceByParticipant := make(map[string]struct {
+		epoch int64
+		cid   string
+	})
 	var totalDealCount, totalDealCountWithinWeek, totalDealCountWithinDay int64
 	for {
 		select {
@@ -72,9 +76,14 @@ func (ds *dealStats) refresh(ctx context.Context) error {
 			return ctx.Err()
 		case dr, ok := <-deals:
 			if !ok {
+				lp := make(recentPieces)
+				for k, v := range latestPieceByParticipant {
+					lp[k] = v.cid
+				}
 				ds.refreshLock.Lock()
 				ds.dealCountByParticipant = dealCountByParticipant
 				ds.refreshLock.Unlock()
+				ds.hf.storeRecentPieces(lp)
 				ds.hf.metrics.notifyDealCount(totalDealCount)
 				ds.hf.metrics.notifyDealCountWithinDay(totalDealCountWithinDay)
 				ds.hf.metrics.notifyDealCountWithinWeek(totalDealCountWithinWeek)
@@ -105,6 +114,15 @@ func (ds *dealStats) refresh(ctx context.Context) error {
 					providerDealCount.bytesWithinWeek += dr.Deal.Proposal.PieceSize
 				}
 				dealCountByParticipant[provider] = providerDealCount
+			}
+			if lp, ok := latestPieceByParticipant[dr.Deal.Proposal.Provider]; !ok || dr.Deal.Proposal.StartEpoch > lp.epoch {
+				latestPieceByParticipant[dr.Deal.Proposal.Provider] = struct {
+					epoch int64
+					cid   string
+				}{
+					epoch: dr.Deal.Proposal.StartEpoch,
+					cid:   dr.Deal.Proposal.PieceCID.CID,
+				}
 			}
 		}
 	}
