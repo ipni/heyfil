@@ -104,6 +104,22 @@ func (hf *heyFil) handleSPSubtree(w http.ResponseWriter, r *http.Request) {
 			} else {
 				hf.handleGetSP(w, id)
 			}
+		case 2:
+			id := segments[0]
+			subreq := segments[1]
+			if id == "" || subreq != "recentPiece" {
+				// Path does not contain SP ID.
+				http.Error(w, "SP ID must be specified as URL parameter", http.StatusBadRequest)
+			} else {
+				hf.recentPiecesMutex.RLock()
+				rp, ok := hf.recentPieces[id]
+				hf.recentPiecesMutex.RUnlock()
+				if !ok {
+					http.Error(w, "No piece found for provided id", http.StatusNotFound)
+				} else if err := json.NewEncoder(w).Encode(rp); err != nil {
+					logger.Errorw("Failed to encode piece id", "id", rp, "err", err)
+				}
+			}
 		default:
 			// Path has multiple segments and therefore 404
 			http.NotFound(w, r)

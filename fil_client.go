@@ -43,6 +43,9 @@ type (
 	}
 	StateMarketDeal struct {
 		Proposal struct {
+			PieceCID struct {
+				CID string `json:"/"`
+			} `json:"PieceCID"`
 			Provider   string `json:"Provider"`
 			StartEpoch int64  `json:"StartEpoch"`
 			EndEpoch   int64  `json:"EndEpoch"`

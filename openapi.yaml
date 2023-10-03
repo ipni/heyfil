@@ -41,6 +41,18 @@ paths:
       responses:
         '200':
           description: Returns allowed methods
+  /sp/{id}/recentPiece:
+    get:
+      summary: Get the CID of a recent piece that is held by a specific SP
+      responses:
+        '200':
+          description: The recent PieceID held by the requested SP
+          content:
+            application/json:
+              schema:
+                type: string
+        '404':
+          description: SP not found
   /sp/{id}:
     get:
       summary: Get detailed information about a specific SP by its ID
