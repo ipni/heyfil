@@ -14,6 +14,7 @@ type (
 	Option  func(*options) error
 	options struct {
 		api                           string
+		apiToken                      string
 		h                             host.Host
 		topic                         string
 		headProtocolPattern           *regexp.Regexp
@@ -36,6 +37,7 @@ type (
 func newOptions(o ...Option) (*options, error) {
 	opts := &options{
 		api:                           `https://api.node.glif.io`,
+		apiToken:                      ``,
 		marketDealsS3Snapshot:         `https://marketdeals.s3.amazonaws.com/StateMarketDeals.json.zst`,
 		marketDealsFilTools:           `https://filecoin.tools/api/deals/list`,
 		httpIndexerEndpoint:           `https://cid.contact`,
@@ -70,6 +72,13 @@ func newOptions(o ...Option) (*options, error) {
 func WithFileCoinAPI(url string) Option {
 	return func(o *options) error {
 		o.api = url
+		return nil
+	}
+}
+
+func WithFileCoinAPIToken(token string) Option {
+	return func(o *options) error {
+		o.apiToken = token
 		return nil
 	}
 }

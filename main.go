@@ -13,12 +13,14 @@ func main() {
 	httpIndexerEndpoint := flag.String("httpIndexerEndpoint", "https://cid.contact", "The HTTP IPNI endpoint to which announcements are made.")
 	maxConcurrentChecks := flag.Int("maxConcurrentChecks", 10, "The maximum number of concurrent checks.")
 	storePath := flag.String("storePath", "", "The directory to use for storing the discovered SP information.")
+	token := flag.String("token", "", "A bearer token to pass for auth to the filecoin api endpoint.")
 	flag.Parse()
 
 	hf, err := newHeyFil(
 		WithHttpIndexerEndpoint(*httpIndexerEndpoint),
 		WithMaxConcurrentChecks(*maxConcurrentChecks),
 		WithStorePath(*storePath),
+		WithFileCoinAPIToken(*token),
 	)
 	if err != nil {
 		panic(err)
