@@ -38,9 +38,14 @@ func newHeyFil(o ...Option) (*heyFil, error) {
 	if err != nil {
 		return nil, err
 	}
+	c := jsonrpc.NewClient(opts.api)
+	if opts.apiToken != "" {
+		c = jsonrpc.NewClientWithOpts(opts.api, &jsonrpc.RPCClientOpts{CustomHeaders: map[string]string{"Authorization": "Bearer " + opts.apiToken}})
+
+	}
 	hf := &heyFil{
 		options: opts,
-		c:       jsonrpc.NewClient(opts.api),
+		c:       c,
 		targets: make(map[string]*Target),
 		toCheck: make(chan *Target, 100),
 		checked: make(chan *Target, 100),
